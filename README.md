@@ -84,6 +84,14 @@ Or set up a cron job:
 0 3 * * * /path/to/openclaw-patchkit/nightly-scan.sh >> /tmp/patchkit-scan.log 2>&1
 ```
 
+## Maintenance
+
+The patch count may decrease over time as:
+- PRs get **merged upstream** (no longer needed)
+- Patches are found **unnecessary or incompatible** with newer releases
+
+Check `pr-patches.conf` for the current active list. The rebuild script automatically skips patches that fail to apply cleanly.
+
 ## Disclaimer
 
 This repository contains only tooling scripts, patch metadata, and build automation.
