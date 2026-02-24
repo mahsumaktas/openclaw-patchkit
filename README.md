@@ -1,101 +1,187 @@
 # OpenClaw Patchkit
 
-Curated patches for [OpenClaw](https://github.com/anthropics/claude-code) from 4300+ open PRs — scored, filtered, and tested against the latest release.
+Curated patches for [OpenClaw](https://github.com/anthropics/claude-code) from 4300+ open PRs, scored with [Treliq](https://github.com/mahsumaktas/treliq), tested against the latest release. Plus a **Cognitive Memory** enhancement backed by peer-reviewed research.
 
-## Stats
+## Overview
 
 | Metric | Count |
 |--------|-------|
 | PRs scanned | 4300+ |
-| PRs scored (treliq) | 2250 |
-| Patches selected | 52 |
-| Manual patches | 5 |
+| PRs scored (Treliq) | 2250 |
+| PR patches | 52 |
+| Custom patches | 6 |
 | Waves | 3 |
 | Base version | v2026.2.22 |
 
-## How to Use
+## Quick Start
 
 ```bash
-# 1. Clone the patchkit
+# Clone
 git clone https://github.com/mahsumaktas/openclaw-patchkit.git
 cd openclaw-patchkit
 
-# 2. Make sure OpenClaw source is available (default: ../claude-code)
-# 3. Run the rebuild script
+# Apply PR patches (requires OpenClaw source at ../claude-code)
 ./rebuild-with-patches.sh
+
+# Apply Cognitive Memory patch (works on installed OpenClaw)
+./manual-patches/cognitive-memory-patch.sh
 ```
 
-The rebuild script will:
-- Apply all patches from `pr-patches.conf` (git apply + manual patches)
-- Skip patches that fail to apply cleanly (logged to stderr)
-- Build the patched version
+---
 
-## Patch Categories
+## Cognitive Memory Patch
 
-Patches are organized in 3 waves:
+A research-backed enhancement to OpenClaw's `memory-lancedb` plugin that adds cognitive scoring, confidence gating, and memory lifecycle management.
 
-### Wave 1 — Original patches (12)
-Hand-picked critical fixes: model allowlist, agent routing, PID cleanup, session contention, security hardening.
+### Features
 
-### Wave 2 — Full scan results (12)
-Systematic scan of all open PRs. Includes config safety, compaction repair, prompt injection prevention, session crash guards.
+| Feature | What it does | Evidence |
+|---------|-------------|----------|
+| **Activation Scoring** | Ranks memories by `similarity (50%) + recency x frequency (35%) + importance (15%)` instead of pure vector distance | ACT-R cognitive model ([Anderson et al.](https://doi.org/10.1037/0033-295X.111.4.1036)), Park et al. 2023, Mem0 production |
+| **Confidence Gating** | Returns nothing when best match scores below threshold, preventing irrelevant context injection | Self-RAG (Asai et al., [ICLR 2024](https://arxiv.org/abs/2310.11511)), FLARE (Jiang et al., 2023) |
+| **Semantic Dedup** | Merges near-duplicate memories (0.85 threshold) instead of rejecting at 0.95, updates text to latest version | Standard IR deduplication |
+| **Category-based Decay** | Memories fade at different rates: `preference/entity = never`, `fact = very slow`, `decision = medium`, `other = fast` | MaRS benchmark (Dec 2025, 300 runs), Mem0 production |
 
-### Wave 3 — Comprehensive scan (32)
-2250 PRs scored with treliq. Covers security (prototype pollution, auth header leaks, cron permissions), stability (fetch timeouts, heartbeat dedup, memory leaks), and correctness (surrogate pairs, Unicode bypass, model schema).
+### How It Works
 
-## Patch Application Methods
+```
+Query → Vector Search → Dormant Filter → Activation Scoring → Confidence Gate → Results
+                                              ↓
+                              score = 0.5 × similarity
+                                    + 0.35 × sigmoid(ln(accessCount) - 0.5 × ln(age))
+                                    + 0.15 × importance
+                                              ↓
+                              if bestScore < 0.35 → return nothing (save tokens)
+                              else → return top-k, update accessCount, boost stability
+```
+
+Memory lifecycle:
+```
+active → fading → dormant
+  ↑         |
+  └─────────┘ (recalled = reactivated, stability × 1.2)
+```
+
+### Configuration
+
+All options are optional with sensible defaults. Add to your OpenClaw memory config:
+
+```json
+{
+  "similarityWeight": 0.50,
+  "activationWeight": 0.35,
+  "importanceWeight": 0.15,
+  "confidenceThreshold": 0.35,
+  "deduplicationThreshold": 0.85,
+  "decayEnabled": true,
+  "decayOnStartup": true
+}
+```
+
+### CLI Commands
+
+```bash
+openclaw ltm decay    # Run decay cycle (transition fading → dormant)
+openclaw ltm revive <id>  # Reactivate a dormant memory
+openclaw ltm stats    # Show memory count
+```
+
+### Research
+
+Full analysis in [`research/`](research/):
+
+- **[Scientific Validation](research/scientific-validation.md)** — Evidence review for each technique (ACT-R, Self-RAG, MaRS, Ebbinghaus)
+- **[MSAM Analysis](research/msam-analysis.md)** — Deep dive into Multi-Stream Adaptive Memory, what to keep and what to discard
+- **[Implementation Specs](docs/cognitive-memory-specs.md)** — Detailed PR specifications with pseudocode
+
+---
+
+## PR Patches (52)
+
+Organized in 3 waves, each progressively broader:
+
+### Wave 1: Critical Fixes (12)
+Hand-picked: model allowlist, agent routing, PID cleanup, session contention, security hardening.
+
+### Wave 2: Systematic Scan (12)
+Full PR scan results: config safety, compaction repair, prompt injection prevention, session crash guards.
+
+### Wave 3: Comprehensive Treliq Scan (28)
+2250 PRs scored with Treliq. Categories:
+- **Security** (7): prototype pollution, auth header leaks, cron permissions, filename injection
+- **Stability** (6): fetch timeouts, heartbeat dedup, memory leaks, error handling
+- **Memory** (4): flush fix, double compaction guard, session store race
+- **Agent/Session** (5): crash guards, path traversal, session cleanup
+- **Gateway/Channel** (5): Discord fixes, delivery recovery, Unicode handling
+- **Other** (5): surrogate pairs, NaN guards, content markers
+
+### Application Methods
 
 | Method | Count | Description |
 |--------|-------|-------------|
-| `git apply` (clean) | 28 | Apply directly, no conflicts |
-| `git apply --exclude tests` | 10 | Apply excluding test files |
-| `git apply --exclude changelog` | 2 | Apply excluding changelog |
-| Manual patch scripts | 5 | Complex patches in `manual-patches/` |
-| Commented out | 1 | Incompatible with base version |
+| `git apply` (clean) | 28 | Direct application |
+| `git apply --exclude tests` | 10 | Excluding test files |
+| `git apply --exclude changelog` | 2 | Excluding changelog |
+| Manual patch scripts | 6 | Complex patches in `manual-patches/` |
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `pr-patches.conf` | Master list of 56 patches with PR numbers and descriptions |
-| `rebuild-with-patches.sh` | Main build script — applies patches and rebuilds |
-| `discover-patches.sh` | Scans GitHub for new mergeable PRs |
-| `nightly-scan.sh` | Automated nightly scan for new patch candidates |
-| `scan-registry.json` | Full scan results with scores and metadata |
-| `manual-patches/` | Shell scripts for patches that need manual application |
-
-## Nightly Automation
-
-`nightly-scan.sh` runs on a schedule to:
-1. Fetch newly opened/updated PRs from the OpenClaw repo
-2. Score each PR using treliq (relevance, risk, merge-readiness)
-3. Test application against the current base version
-4. Update `scan-registry.json` with results
-5. Flag high-scoring candidates for manual review
-
-Run it manually:
-```bash
-./nightly-scan.sh
+```
+openclaw-patchkit/
+├── README.md
+├── LICENSE                          # MIT
+├── pr-patches.conf                  # Master list of 52 PR patches
+├── rebuild-with-patches.sh          # Main build script
+├── discover-patches.sh              # Scan GitHub for new PRs
+├── nightly-scan.sh                  # Automated nightly scan
+├── scan-registry.json               # Scan results with scores
+├── manual-patches/
+│   ├── cognitive-memory-patch.sh    # Cognitive Memory enhancement
+│   ├── cognitive-memory-backup/     # Patched + original files
+│   ├── 16609-session-store-race.sh
+│   ├── 16894-surrogate-truncation.sh
+│   ├── 19675-zero-width-unicode.sh
+│   ├── 22901-nan-reservetokens.sh
+│   └── 24583-strip-external-content.sh
+├── docs/
+│   └── cognitive-memory-specs.md    # Detailed implementation specs
+└── research/
+    ├── scientific-validation.md     # Peer-reviewed evidence
+    └── msam-analysis.md             # MSAM deep dive & design
 ```
 
-Or set up a cron job:
+## Automation
+
+### Nightly Scan
+
+`nightly-scan.sh` automatically:
+1. Fetches new/updated PRs from OpenClaw repo
+2. Scores each PR with Treliq (relevance, risk, merge-readiness)
+3. Tests application against current base version
+4. Updates `scan-registry.json`
+5. Flags high-scoring candidates for review
+
 ```bash
-# Every night at 3am
+# Manual run
+./nightly-scan.sh
+
+# Cron (every night at 3am)
 0 3 * * * /path/to/openclaw-patchkit/nightly-scan.sh >> /tmp/patchkit-scan.log 2>&1
 ```
 
 ## Maintenance
 
-The patch count may decrease over time as:
-- PRs get **merged upstream** (no longer needed)
-- Patches are found **unnecessary or incompatible** with newer releases
+Patch count changes over time:
+- PRs **merged upstream** are automatically skipped by the rebuild script
+- Patches found **unnecessary or incompatible** are removed (tracked in commit history)
+- New high-value PRs are added via nightly scan
 
-Check `pr-patches.conf` for the current active list. The rebuild script automatically skips patches that fail to apply cleanly.
+`pr-patches.conf` is the single source of truth for active patches.
 
 ## Disclaimer
 
-This repository contains only tooling scripts, patch metadata, and build automation.
-It does **not** include OpenClaw source code or patched binaries.
+This repository contains only tooling scripts, patch metadata, research documents, and build automation. It does **not** include OpenClaw source code or patched binaries.
+
 [OpenClaw](https://github.com/anthropics/claude-code) is developed by Anthropic and licensed under the Apache License 2.0.
 
 ## License
