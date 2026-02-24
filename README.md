@@ -1,17 +1,18 @@
 # OpenClaw Patchkit
 
-Curated patches for [OpenClaw](https://github.com/anthropics/claude-code) from 4300+ open PRs, scored with [Treliq](https://github.com/mahsumaktas/treliq), tested against the latest release. Plus a **Cognitive Memory** enhancement backed by peer-reviewed research.
+Curated patches for [OpenClaw](https://github.com/openclaw/openclaw) from 4300+ open PRs, scored with Sonnet 4.6 via [Treliq](https://github.com/mahsumaktas/treliq), tested against the latest release. Plus a **Cognitive Memory** enhancement backed by peer-reviewed research.
 
 ## Overview
 
 | Metric | Count |
 |--------|-------|
-| PRs scanned | 4300+ |
-| PRs scored (Treliq) | 2250 |
-| PR patches | 52 |
-| Custom patches | 6 |
-| Waves | 3 |
+| PRs scanned (GraphQL) | 4,320 |
+| PRs scored (Sonnet 4.6) | 4,051 |
+| PR patches | 90 |
+| Manual patch scripts | 15 |
+| Waves | 4 |
 | Base version | v2026.2.22 |
+| Last updated | 2026-02-24 |
 
 ## Quick Start
 
@@ -96,9 +97,9 @@ Full analysis in [`research/`](research/):
 
 ---
 
-## PR Patches (52)
+## PR Patches (90)
 
-Organized in 3 waves, each progressively broader:
+Organized in 4 waves, each progressively broader:
 
 ### Wave 1: Critical Fixes (12)
 Hand-picked: model allowlist, agent routing, PID cleanup, session contention, security hardening.
@@ -107,22 +108,40 @@ Hand-picked: model allowlist, agent routing, PID cleanup, session contention, se
 Full PR scan results: config safety, compaction repair, prompt injection prevention, session crash guards.
 
 ### Wave 3: Comprehensive Treliq Scan (28)
-2250 PRs scored with Treliq. Categories:
+2250 PRs scored with Treliq + Haiku. Categories:
 - **Security** (7): prototype pollution, auth header leaks, cron permissions, filename injection
 - **Stability** (6): fetch timeouts, heartbeat dedup, memory leaks, error handling
 - **Memory** (4): flush fix, double compaction guard, session store race
 - **Agent/Session** (5): crash guards, path traversal, session cleanup
 - **Gateway/Channel** (5): Discord fixes, delivery recovery, Unicode handling
-- **Other** (5): surrogate pairs, NaN guards, content markers
+
+### Wave 4: Sonnet 4.6 Full Scan (38)
+4051 PRs re-scored with Sonnet 4.6. New finds:
+- **Security** (3): cross-channel reply routing, auth rate limiting, OAuth scope classification
+- **Gateway** (5): LaunchAgent CA certs, pairing requestId, config env var preservation, loopback RPC, TLS scheme
+- **Stability** (8): billing failover, empty content blocks, error payload filtering, FD exhaustion prevention
+- **Provider/Model** (6): Bedrock compatibility, model fallback resolution, DashScope/Qwen compat, video/audio input
+- **Channel** (5): Telegram crash replay, colon provider IDs, reaction filtering, reminder guard leak
+- **Other** (11): config coercion, tool group validation, chat transcript persistence, stale metadata cleanup
 
 ### Application Methods
 
 | Method | Count | Description |
 |--------|-------|-------------|
-| `git apply` (clean) | 28 | Direct application |
-| `git apply --exclude tests` | 10 | Excluding test files |
-| `git apply --exclude changelog` | 2 | Excluding changelog |
-| Manual patch scripts | 6 | Complex patches in `manual-patches/` |
+| `git apply` (clean) | 55 | Direct application |
+| `git apply --exclude tests` | 14 | Excluding test files |
+| `git apply --exclude changelog` | 6 | Excluding changelog |
+| Manual patch scripts | 15 | Complex patches in `manual-patches/` |
+
+### Score Distribution (4051 PRs)
+
+| Score Range | Count |
+|-------------|-------|
+| 85+ | 2 |
+| 80-84 | 100 |
+| 75-79 | 558 |
+| 70-74 | 962 |
+| <70 | 2429 |
 
 ## Files
 
@@ -130,7 +149,7 @@ Full PR scan results: config safety, compaction repair, prompt injection prevent
 openclaw-patchkit/
 ├── README.md
 ├── LICENSE                          # MIT
-├── pr-patches.conf                  # Master list of 52 PR patches
+├── pr-patches.conf                  # Master list of 90 PR patches
 ├── rebuild-with-patches.sh          # Main build script
 ├── discover-patches.sh              # Scan GitHub for new PRs
 ├── nightly-scan.sh                  # Automated nightly scan
@@ -142,7 +161,17 @@ openclaw-patchkit/
 │   ├── 16894-surrogate-truncation.sh
 │   ├── 19675-zero-width-unicode.sh
 │   ├── 22901-nan-reservetokens.sh
-│   └── 24583-strip-external-content.sh
+│   ├── 24583-strip-external-content.sh
+│   ├── 17371-heartbeat-strip.sh
+│   ├── 22900-discord-v2-flag.sh
+│   ├── 19134-sse-utf8.sh
+│   ├── 16987-skipcache-session-store.sh
+│   ├── 21847-session-model-overrides.sh
+│   ├── 17435-debounce-retry.sh
+│   ├── 16015-truncate-chat-history.sh
+│   ├── 17823-cron-maps-cleanup.sh
+│   ├── 20867-video-audio-input.sh
+│   └── 11986-empty-assistant-content.sh
 ├── docs/
 │   └── cognitive-memory-specs.md    # Detailed implementation specs
 └── research/
@@ -154,19 +183,17 @@ openclaw-patchkit/
 
 ### Nightly Scan
 
-`nightly-scan.sh` automatically:
-1. Fetches new/updated PRs from OpenClaw repo
-2. Scores each PR with Treliq (relevance, risk, merge-readiness)
-3. Tests application against current base version
-4. Updates `scan-registry.json`
-5. Flags high-scoring candidates for review
+`nightly-scan.sh` runs at 5 AM daily via cron:
+1. Fetches PRs updated in the last 3 days from the OpenClaw repo
+2. Filters against scan registry to skip already-scored PRs
+3. Scores new PRs using Treliq + Sonnet 4.6
+4. Checks if patched PRs have been merged upstream (removes if so)
+5. Updates `scan-registry.json` and pushes to this repo
+6. Flags high-scoring candidates for manual review
 
 ```bash
-# Manual run
-./nightly-scan.sh
-
-# Cron (every night at 3am)
-0 3 * * * /path/to/openclaw-patchkit/nightly-scan.sh >> /tmp/patchkit-scan.log 2>&1
+# Cron (5 AM daily)
+0 5 * * * ~/.openclaw/my-patches/nightly-scan.sh >> ~/.openclaw/my-patches/nightly.log 2>&1
 ```
 
 ## Maintenance
