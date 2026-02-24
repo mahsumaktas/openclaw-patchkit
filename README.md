@@ -8,7 +8,7 @@ Curated patches for [OpenClaw](https://github.com/anthropics/claude-code) from 4
 |--------|-------|
 | PRs scanned | 4300+ |
 | PRs scored (treliq) | 2250 |
-| Patches selected | 56 |
+| Patches selected | 52 |
 | Manual patches | 5 |
 | Waves | 3 |
 | Base version | v2026.2.22 |
