@@ -123,6 +123,11 @@ for pr_num in "${OPEN_PRS[@]}"; do
     git apply --exclude='*.test.*' --exclude='*.e2e.*' "/tmp/oc-pr-diffs/${pr_num}.diff"
     ok "#$pr_num applied (tests excluded)"
     APPLIED=$((APPLIED + 1))
+  # Strategy 2b: Exclude CHANGELOG + tests (CHANGELOG context drifts across versions)
+  elif git apply --check --exclude='CHANGELOG.md' --exclude='*.test.*' --exclude='*.e2e.*' --exclude='*.live.*' "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
+    git apply --exclude='CHANGELOG.md' --exclude='*.test.*' --exclude='*.e2e.*' --exclude='*.live.*' "/tmp/oc-pr-diffs/${pr_num}.diff"
+    ok "#$pr_num applied (changelog+tests excluded)"
+    APPLIED=$((APPLIED + 1))
   # Strategy 3: 3-way merge
   elif git apply --check --3way "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply --3way "/tmp/oc-pr-diffs/${pr_num}.diff"
@@ -188,8 +193,9 @@ else
 fi
 
 info "Swapping dist..."
-rm -rf "$OPENCLAW_ROOT/dist"
-cp -R "$WORKDIR/dist" "$OPENCLAW_ROOT/dist"
+# Clear contents instead of removing dir (parent may be root-owned)
+find "$OPENCLAW_ROOT/dist" -mindepth 1 -delete 2>/dev/null || rm -rf "$OPENCLAW_ROOT/dist"/* 2>/dev/null || true
+cp -R "$WORKDIR/dist/"* "$OPENCLAW_ROOT/dist/"
 ok "Dist replaced with patched build"
 
 # ── Step 5: Verify ───────────────────────────────────────────────────────────
@@ -199,8 +205,8 @@ if [ -f "$OPENCLAW_ROOT/dist/entry.js" ]; then
   ok "entry.js present"
 else
   fail "entry.js MISSING — restoring backup!"
-  rm -rf "$OPENCLAW_ROOT/dist"
-  cp -R "$BACKUP_DIR" "$OPENCLAW_ROOT/dist"
+  find "$OPENCLAW_ROOT/dist" -mindepth 1 -delete 2>/dev/null || true
+  cp -R "$BACKUP_DIR/"* "$OPENCLAW_ROOT/dist/"
   exit 1
 fi
 
