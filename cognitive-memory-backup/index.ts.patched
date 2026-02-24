@@ -6,7 +6,7 @@
  * Provides seamless auto-recall and auto-capture via lifecycle hooks.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type * as LanceDB from "@lancedb/lancedb";
 import { Type } from "@sinclair/typebox";
 import OpenAI from "openai";
@@ -50,12 +50,29 @@ type MemoryEntry = {
   // PR C: Decay & lifecycle
   stability: number;
   state: MemoryState;
+  // Content hash dedup
+  contentHash: string;
+  // Related memory linking
+  relatedTo: string[];
 };
 
 type MemorySearchResult = {
   entry: MemoryEntry;
   score: number;
 };
+
+function computeContentHash(category: string, text: string): string {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  return createHash("sha256").update(`${category}:${normalized}`).digest("hex").slice(0, 16);
+}
+
+function parseRelatedTo(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === "string") {
+    try { return JSON.parse(value) as string[]; } catch { return []; }
+  }
+  return [];
+}
 
 // ============================================================================
 // LanceDB Provider
@@ -105,13 +122,36 @@ class MemoryDB {
           lastAccessed: 0,
           stability: 1.0,
           state: "active",
+          contentHash: "",
+          relatedTo: "[]",
         },
       ]);
       await this.table.delete('id = "__schema__"');
     }
   }
 
-  async store(entry: Omit<MemoryEntry, "id" | "createdAt" | "accessCount" | "lastAccessed" | "stability" | "state">): Promise<MemoryEntry> {
+  async findByContentHash(hash: string): Promise<MemoryEntry | null> {
+    await this.ensureInitialized();
+    const rows = await this.table!.query().where(`contentHash = '${hash}'`).limit(1).toArray();
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    return {
+      id: row.id as string,
+      text: row.text as string,
+      vector: row.vector as number[],
+      importance: (row.importance as number) ?? 0.5,
+      category: row.category as MemoryCategory,
+      createdAt: row.createdAt as number,
+      accessCount: (row.accessCount as number) ?? 1,
+      lastAccessed: (row.lastAccessed as number) ?? (row.createdAt as number),
+      stability: (row.stability as number) ?? 1.0,
+      state: ((row.state as string) ?? "active") as MemoryState,
+      contentHash: (row.contentHash as string) ?? "",
+      relatedTo: parseRelatedTo(row.relatedTo),
+    };
+  }
+
+  async store(entry: Omit<MemoryEntry, "id" | "createdAt" | "accessCount" | "lastAccessed" | "stability" | "state" | "contentHash" | "relatedTo">): Promise<MemoryEntry> {
     await this.ensureInitialized();
 
     const now = Date.now();
@@ -123,9 +163,12 @@ class MemoryDB {
       lastAccessed: now,
       stability: 1.0,
       state: "active",
+      contentHash: computeContentHash(entry.category, entry.text),
+      relatedTo: [],
     };
 
-    await this.table!.add([fullEntry]);
+    // LanceDB stores arrays as JSON strings for non-vector fields
+    await this.table!.add([{ ...fullEntry, relatedTo: JSON.stringify(fullEntry.relatedTo) }]);
     return fullEntry;
   }
 
@@ -174,6 +217,8 @@ class MemoryDB {
             lastAccessed: (row.lastAccessed as number) ?? (row.createdAt as number) ?? now,
             stability: (row.stability as number) ?? 1.0,
             state: ((row.state as string) ?? "active") as MemoryState,
+            contentHash: (row.contentHash as string) ?? "",
+            relatedTo: parseRelatedTo(row.relatedTo),
           },
           score,
         };
@@ -455,10 +500,12 @@ const memoryPlugin = {
           }
 
           const text = results
-            .map(
-              (r, i) =>
-                `${i + 1}. [${r.entry.category}] ${r.entry.text} (${(r.score * 100).toFixed(0)}%)`,
-            )
+            .map((r, i) => {
+              const related = r.entry.relatedTo.length > 0
+                ? ` [related: ${r.entry.relatedTo.join(", ")}]`
+                : "";
+              return `${i + 1}. [${r.entry.category}] ${r.entry.text} (${(r.score * 100).toFixed(0)}%)${related}`;
+            })
             .join("\n");
 
           // Strip vector data for serialization (typed arrays can't be cloned)
@@ -468,6 +515,7 @@ const memoryPlugin = {
             category: r.entry.category,
             importance: r.entry.importance,
             score: r.score,
+            relatedTo: r.entry.relatedTo,
           }));
 
           return {
@@ -506,6 +554,21 @@ const memoryPlugin = {
             category?: MemoryEntry["category"];
           };
 
+          // Content hash dedup: exact match before embedding
+          const hash = computeContentHash(category, text);
+          const hashMatch = await db.findByContentHash(hash);
+          if (hashMatch) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Already stored (exact match): "${hashMatch.text.slice(0, 100)}..."`,
+                },
+              ],
+              details: { action: "exact_duplicate", id: hashMatch.id },
+            };
+          }
+
           const vector = await embeddings.embed(text);
 
           // Semantic dedup: check for near-duplicates and merge
@@ -516,6 +579,7 @@ const memoryPlugin = {
             try {
               await db.updateEntry(existing[0].entry.id, {
                 text,
+                contentHash: hash,
                 accessCount: existing[0].entry.accessCount + 1,
                 lastAccessed: Date.now(),
                 importance: Math.max(existing[0].entry.importance, importance),
@@ -538,6 +602,17 @@ const memoryPlugin = {
             }
           }
 
+          // Related-to linking: find similar but non-duplicate memories (0.60-0.84)
+          const RELATED_MIN = 0.60;
+          const RELATED_MAX = 0.84;
+          const relatedCandidates = await db.search(vector, 5, RELATED_MIN);
+          const relatedIds: string[] = [];
+          for (const candidate of relatedCandidates) {
+            if (candidate.score <= RELATED_MAX) {
+              relatedIds.push(candidate.entry.id);
+            }
+          }
+
           const entry = await db.store({
             text,
             vector,
@@ -545,9 +620,32 @@ const memoryPlugin = {
             category,
           });
 
+          // If we found related memories, update relatedTo on both sides
+          if (relatedIds.length > 0) {
+            // Set relatedTo on the new entry
+            await db.updateEntry(entry.id, { relatedTo: JSON.stringify(relatedIds) });
+            entry.relatedTo = relatedIds;
+
+            // Add the new entry's ID to each related memory's relatedTo
+            for (const relatedId of relatedIds) {
+              try {
+                const relatedCandidate = relatedCandidates.find((c) => c.entry.id === relatedId);
+                if (relatedCandidate) {
+                  const existingRelated = relatedCandidate.entry.relatedTo;
+                  if (!existingRelated.includes(entry.id)) {
+                    existingRelated.push(entry.id);
+                    await db.updateEntry(relatedId, { relatedTo: JSON.stringify(existingRelated) });
+                  }
+                }
+              } catch {
+                // Non-critical: don't fail store if linking fails
+              }
+            }
+          }
+
           return {
-            content: [{ type: "text", text: `Stored: "${text.slice(0, 100)}..."` }],
-            details: { action: "created", id: entry.id },
+            content: [{ type: "text", text: `Stored: "${text.slice(0, 100)}..."${relatedIds.length > 0 ? ` (linked to ${relatedIds.length} related memories)` : ""}` }],
+            details: { action: "created", id: entry.id, relatedTo: relatedIds },
           };
         },
       },
@@ -803,6 +901,12 @@ const memoryPlugin = {
           let stored = 0;
           for (const text of toCapture.slice(0, 3)) {
             const category = detectCategory(text);
+
+            // Content hash dedup: skip if exact match exists
+            const hash = computeContentHash(category, text);
+            const hashMatch = await db.findByContentHash(hash);
+            if (hashMatch) continue;
+
             const vector = await embeddings.embed(text);
 
             // Check for duplicates using configured dedup threshold
@@ -812,6 +916,7 @@ const memoryPlugin = {
               try {
                 await db.updateEntry(existing[0].entry.id, {
                   text,
+                  contentHash: hash,
                   accessCount: existing[0].entry.accessCount + 1,
                   lastAccessed: Date.now(),
                   importance: Math.max(existing[0].entry.importance, 0.7),

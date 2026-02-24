@@ -41,12 +41,14 @@ A research-backed enhancement to OpenClaw's `memory-lancedb` plugin that adds co
 | **Activation Scoring** | Ranks memories by `similarity (50%) + recency x frequency (35%) + importance (15%)` instead of pure vector distance | ACT-R cognitive model ([Anderson et al.](https://doi.org/10.1037/0033-295X.111.4.1036)), Park et al. 2023, Mem0 production |
 | **Confidence Gating** | Returns nothing when best match scores below threshold, preventing irrelevant context injection | Self-RAG (Asai et al., [ICLR 2024](https://arxiv.org/abs/2310.11511)), FLARE (Jiang et al., 2023) |
 | **Semantic Dedup** | Merges near-duplicate memories (0.85 threshold) instead of rejecting at 0.95, updates text to latest version | Standard IR deduplication |
+| **Content Hash Dedup** | sha256-based exact dedup before embedding check, zero-cost rejection of identical memories | Deterministic, no false positives |
+| **Related-To Linking** | Bidirectional links between memories with 0.60-0.84 similarity, surfaced on recall | memU-inspired cross-referencing |
 | **Category-based Decay** | Memories fade at different rates: `preference/entity = never`, `fact = very slow`, `decision = medium`, `other = fast` | MaRS benchmark (Dec 2025, 300 runs), Mem0 production |
 
 ### How It Works
 
 ```
-Query → Vector Search → Dormant Filter → Activation Scoring → Confidence Gate → Results
+Query → Content Hash Check → Vector Search → Dormant Filter → Activation Scoring → Confidence Gate → Results (with relatedTo IDs)
                                               ↓
                               score = 0.5 × similarity
                                     + 0.35 × sigmoid(ln(accessCount) - 0.5 × ln(age))
