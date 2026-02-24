@@ -84,6 +84,12 @@ Or set up a cron job:
 0 3 * * * /path/to/openclaw-patchkit/nightly-scan.sh >> /tmp/patchkit-scan.log 2>&1
 ```
 
+## Disclaimer
+
+This repository contains only tooling scripts, patch metadata, and build automation.
+It does **not** include OpenClaw source code or patched binaries.
+[OpenClaw](https://github.com/anthropics/claude-code) is developed by Anthropic and licensed under the Apache License 2.0.
+
 ## License
 
-MIT
+[MIT](LICENSE)
