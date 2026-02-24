@@ -132,7 +132,7 @@ for pr_num in "${OPEN_PRS[@]}"; do
   elif ls "$MANUAL_DIR"/${pr_num}-*.sh 1>/dev/null 2>&1; then
     MANUAL_SCRIPT=$(ls "$MANUAL_DIR"/${pr_num}-*.sh | head -1)
     info "#$pr_num using manual patch: $(basename "$MANUAL_SCRIPT")"
-    if bash "$MANUAL_SCRIPT" 2>&1 | while read -r line; do echo "    $line"; done; then
+    if bash "$MANUAL_SCRIPT" "$WORKDIR" 2>&1 | while read -r line; do echo "    $line"; done; then
       ok "#$pr_num manual patch applied"
       APPLIED=$((APPLIED + 1))
     else
