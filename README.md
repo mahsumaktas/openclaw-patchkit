@@ -9,15 +9,13 @@ Curated bug-fix patches for [OpenClaw](https://github.com/openclaw/openclaw), se
 | Base version | **v2026.2.23** |
 | PRs scanned | 4,320 |
 | PRs scored (Sonnet 4.6) | 4,051 |
-| Patches tracked | 86 |
-| Successfully applied | **47** |
-| Merged upstream | 4 (auto-removed) |
-| Closed upstream | 31 (auto-skipped) |
-| Manual patch scripts | 15 |
-| Waves | 4 |
+| Patches tracked | **57** |
+| Successfully applied | **57/57 (100%)** |
+| Build status | **771 files compiled** |
+| Merged upstream | 2 (auto-removed) |
+| Manual patch scripts | 17 |
+| Waves | 5 |
 | Last updated | 2026-02-25 |
-
-> **Note:** Not all tracked patches apply cleanly to every release. The rebuild script automatically skips closed PRs and reports failures. See [Application Results](#application-results-v2026223) for details.
 
 ## Quick Start
 
@@ -26,29 +24,56 @@ Curated bug-fix patches for [OpenClaw](https://github.com/openclaw/openclaw), se
 git clone https://github.com/mahsumaktas/openclaw-patchkit.git
 cd openclaw-patchkit
 
-# Apply PR patches (requires OpenClaw source at ../claude-code)
-./rebuild-with-patches.sh
+# Full pipeline (rebuild + dist patches + extensions + verify)
+./patch-openclaw.sh
 
-# Apply Cognitive Memory patch (works on installed OpenClaw)
-./cognitive-memory-patch.sh
+# Or run individual phases:
+./patch-openclaw.sh --phase 1    # Source rebuild only
+./patch-openclaw.sh --phase 2    # Dist patches only
+./patch-openclaw.sh --phase 3    # Extension patches only
+./patch-openclaw.sh --status     # Show last run report
+./patch-openclaw.sh --dry-run    # Preview without changes
 ```
+
+---
+
+## Unified Patch Pipeline
+
+`patch-openclaw.sh` orchestrates all patching in 4 phases:
+
+```
+Phase 1: Source Rebuild    → 57 PR diffs applied, TypeScript build, dist swap
+Phase 2: Dist Patches      → TLS probe, self-signed cert, LanceDB deps
+Phase 3: Extension Patches → Cognitive Memory enhancement
+Phase 4: Verification      → 5 automated checks (entry.js, TLS, cert, memory, version)
+```
+
+### 5-Strategy Cascade (Phase 1)
+
+Each PR diff is tried with increasingly relaxed strategies until one succeeds:
+
+| Strategy | Description | Count |
+|----------|-------------|-------|
+| 1. Clean apply | `git apply` — exact match | 34 |
+| 2. Exclude tests | `--exclude '*.test.*'` | 8 |
+| 3. Exclude changelog+tests | `--exclude 'CHANGELOG.md'` + tests | 2 |
+| 4. 3-way merge | `git apply --3way` | 0 |
+| 5. Manual patch | Custom bash/python3 scripts | 17 |
+| **Total** | | **57/57** |
 
 ---
 
 ## Application Results (v2026.2.23)
 
-On the latest release (v2026.2.23), rebuild-with-patches.sh produces:
-
 | Category | Count | Notes |
 |----------|-------|-------|
-| Applied (clean) | 42 | Direct `git apply` |
-| Applied (manual recovery) | 5 | Exclude-tests or manual patch |
-| **Total applied** | **47** | |
-| Skipped (closed upstream) | 31 | PRs closed without merge |
-| Skipped (merged upstream) | 4 | #24559, #24594, #24795, #24761 |
-| Failed (context mismatch) | 8 | Low priority or pre-existing |
-
-The 8 failures are either low-priority fixes (#22900 Discord sed compat), already fixed differently upstream (#22741), or pre-existing issues from the base version.
+| Applied (clean) | 34 | Direct `git apply` |
+| Applied (exclude tests) | 8 | Test files excluded |
+| Applied (exclude changelog+tests) | 2 | CHANGELOG context drift |
+| Applied (manual patch) | 13 | Custom scripts for context mismatches |
+| **Total applied** | **57** | **0 failures** |
+| Build output | 771 files | TypeScript compilation |
+| Verification | 5/5 | All checks passed |
 
 ---
 
@@ -123,30 +148,37 @@ Full analysis in [`research/`](research/):
 
 ## PR Patches
 
-Organized in 4 waves. Each patch corresponds to an open (or recently closed) PR in the OpenClaw repo.
+Organized in 5 waves across 57 active patches.
 
-### Wave 1: Hand-picked Critical Fixes (9 active)
-Model allowlist, agent routing, PID cleanup, session contention, security hardening. 2 patches merged upstream in v2026.2.23.
+### Wave 1: Hand-picked Critical Fixes (7 active)
+Model allowlist, agent routing, PID cleanup, session contention, security hardening.
 
-### Wave 2: Systematic Scan (12 active)
-Config safety, compaction repair, prompt injection prevention, session crash guards.
+### Wave 2: Systematic Scan (8 active)
+Config safety, compaction repair, prompt injection prevention, session crash guards. Includes 2 manual patches for Unicode handling.
 
-### Wave 3: Comprehensive Treliq Scan (24 active)
+### Wave 3: Comprehensive Treliq Scan (19 active)
 2250 PRs scored with Treliq + Haiku. Categories:
-- **Security** (7): prototype pollution, auth header leaks, cron permissions, filename injection
-- **Stability** (6): fetch timeouts, heartbeat dedup, memory leaks, error handling
-- **Memory** (4): flush fix, double compaction guard, session store race
-- **Agent/Session** (5): crash guards, path traversal, session cleanup
-- **Gateway/Channel** (5): Discord fixes, delivery recovery, Unicode handling
+- **Security** (4): prototype pollution, auth header leaks, cron permissions, filename injection
+- **Stability** (5): fetch timeouts, heartbeat dedup, error handling, connection classification
+- **Memory/Session** (4): flush fix, session store, BM25 scoring, stale model info
+- **Gateway/Channel** (6): Discord v2 flags, SSE encoding, oversized messages, WebSocket 429
 
-### Wave 4: Sonnet 4.6 Full Scan (36 active)
-4051 PRs re-scored with Sonnet 4.6. 2 patches merged upstream in v2026.2.23. Categories:
-- **Security** (3): cross-channel reply routing, auth rate limiting, OAuth scope classification
-- **Gateway** (5): LaunchAgent CA certs, pairing requestId, config env var preservation, loopback RPC, TLS scheme
-- **Stability** (8): billing failover, empty content blocks, error payload filtering, FD exhaustion prevention
-- **Provider/Model** (6): Bedrock compatibility, model fallback resolution, DashScope/Qwen compat, video/audio input
-- **Channel** (5): Telegram crash replay, colon provider IDs, reaction filtering, reminder guard leak
-- **Other** (9): config coercion, tool group validation, chat transcript persistence, stale metadata cleanup
+### Wave 4: Sonnet 4.6 Full Scan (17 active)
+4051 PRs re-scored with Sonnet 4.6. Categories:
+- **Security** (1): auth rate limiting
+- **Gateway** (4): LaunchAgent CA certs, pairing requestId, config env var preservation, TLS scheme
+- **Stability** (4): billing failover, error payload filtering, FD exhaustion prevention, type arrays
+- **Provider/Model** (3): Bedrock video/audio, colon provider IDs, codex usage window
+- **Channel** (4): Telegram reaction filtering, auto-reply guard, logger binding, audio MIME mappings
+- **Other** (1): archived transcript usage costs
+
+### Wave 5: Tier 1 Batch (6 active)
+Score >= 80 from curated report. Categories:
+- **Onboarding** (1): fallback install for missing channel plugin
+- **Security** (1): doctor TLS warning for network-exposed gateway
+- **Hooks** (2): sessionKey in hook context, configured model for slug generator
+- **Cron** (1): disable messaging when delivery.mode=none
+- **Merged/Closed** (removed): #24300, #12499, #12792, #23974
 
 ### Score Distribution (4051 PRs)
 
@@ -171,12 +203,17 @@ Config safety, compaction repair, prompt injection prevention, session crash gua
 4. Checks if patched PRs have been merged upstream
 5. Updates `scan-registry.json` and pushes to this repo
 
-A separate [Treliq nightly pipeline](https://github.com/mahsumaktas/treliq) also runs cumulative scoring with GitHub API integration, score caching, and ready-to-steal tracking.
-
 ```bash
 # Cron (5 AM daily)
 0 5 * * * ~/.openclaw/my-patches/nightly-scan.sh >> ~/.openclaw/my-patches/nightly.log 2>&1
 ```
+
+### Post-Update Check
+
+`post-update-check.sh` runs automatically after OpenClaw updates to re-apply patches:
+- Detects version changes
+- Triggers full `patch-openclaw.sh` pipeline
+- Writes version marker to prevent duplicate runs
 
 ---
 
@@ -186,14 +223,18 @@ A separate [Treliq nightly pipeline](https://github.com/mahsumaktas/treliq) also
 openclaw-patchkit/
 |-- README.md
 |-- LICENSE                          # MIT
-|-- pr-patches.conf                  # Tracked PR patches (86 active)
-|-- rebuild-with-patches.sh          # Main build script
+|-- pr-patches.conf                  # 57 active PR patches (single source of truth)
+|-- patch-openclaw.sh                # Unified 4-phase orchestrator
+|-- rebuild-with-patches.sh          # Phase 1: source rebuild (5-strategy cascade)
+|-- dist-patches.sh                  # Phase 2: compiled JS patches
+|-- post-update-check.sh             # Auto-patch after OpenClaw updates
 |-- discover-patches.sh              # Scan GitHub for new PRs
-|-- nightly-scan.sh                  # Automated nightly scan
-|-- cognitive-memory-patch.sh        # Cognitive Memory enhancement
-|-- scan-registry.json               # Scan results with scores
-|-- manual-patches/                  # 15 complex patch scripts
-|-- cognitive-memory-backup/         # Patched + original files
+|-- nightly-scan.sh                  # Automated nightly scan + scoring
+|-- scan-registry.json               # 4051 scored PRs with metadata
+|-- manual-patches/                  # 17 complex PR patch scripts + 1 extension
+|   |-- cognitive-memory-patch.sh    # Cognitive Memory enhancement
+|   |-- cognitive-memory-backup/     # Patched + original files
+|   +-- NNNNN-description.sh         # Per-PR manual patches
 |-- docs/
 |   +-- cognitive-memory-specs.md    # Detailed implementation specs
 +-- research/
@@ -205,9 +246,10 @@ openclaw-patchkit/
 
 Patch count changes over time:
 - PRs **merged upstream** are marked in `pr-patches.conf` and excluded from rebuild
-- PRs **closed upstream** are auto-skipped by the rebuild script (still tracked for reference)
-- Patches with **context conflicts** on new releases may need manual adjustment
+- PRs **closed upstream** are auto-skipped by the rebuild script
+- Patches with **context conflicts** on new releases get manual patch scripts
 - New high-value PRs are discovered via nightly scan
+- `patch-openclaw.sh --status` shows last pipeline run results
 
 `pr-patches.conf` is the single source of truth for tracked patches.
 
