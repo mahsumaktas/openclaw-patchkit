@@ -1,21 +1,21 @@
 # OpenClaw Patchkit
 
-Curated bug-fix patches for [OpenClaw](https://github.com/openclaw/openclaw), selected from 4000+ open PRs using AI-powered scoring ([Treliq](https://github.com/mahsumaktas/treliq) + Sonnet 4.6). Includes a research-backed **Cognitive Memory** enhancement.
+Curated bug-fix patches for [OpenClaw](https://github.com/openclaw/openclaw), selected from 4000+ open PRs using AI-powered scoring ([Treliq](https://github.com/mahsumaktas/treliq) + Sonnet 4.6). Includes a research-backed **Cognitive Memory v3** enhancement with entity extraction, enforced RAG, and hybrid capture pipeline.
 
 ## Current State
 
 | Metric | Value |
 |--------|-------|
-| Base version | **v2026.2.23** |
+| Base version | **v2026.2.24** |
 | PRs scanned | 4,320 |
 | PRs scored (Sonnet 4.6) | 4,051 |
-| Patches tracked | **57** |
-| Successfully applied | **57/57 (100%)** |
-| Build status | **771 files compiled** |
-| Merged upstream | 2 (auto-removed) |
-| Manual patch scripts | 17 |
-| Waves | 5 |
-| Last updated | 2026-02-25 |
+| Patches tracked | **64** |
+| Successfully applied | **64/64 (100%)** |
+| Build status | **768 files compiled** |
+| Manual patch scripts | 20 |
+| Cognitive Memory | **v3** (entity extraction, enforced RAG, hybrid capture) |
+| Waves | 7 |
+| Last updated | 2026-02-26 |
 
 ## Quick Start
 
@@ -42,10 +42,10 @@ cd openclaw-patchkit
 `patch-openclaw.sh` orchestrates all patching in 4 phases:
 
 ```
-Phase 1: Source Rebuild    → 57 PR diffs applied, TypeScript build, dist swap
-Phase 2: Dist Patches      → TLS probe, self-signed cert, LanceDB deps
-Phase 3: Extension Patches → Cognitive Memory enhancement
-Phase 4: Verification      → 5 automated checks (entry.js, TLS, cert, memory, version)
+Phase 1: Source Rebuild    → 64 PR diffs applied, TypeScript build, dist swap
+Phase 2: Dist Patches      → TLS probe, self-signed cert, LanceDB deps, Cognitive Memory
+Phase 3: Extension Patches → Cognitive Memory (fallback if Phase 2 handled it)
+Phase 4: Verification      → 6 automated checks (entry.js, TLS, cert, memory, LanceDB, version)
 ```
 
 ### 5-Strategy Cascade (Phase 1)
@@ -54,107 +54,125 @@ Each PR diff is tried with increasingly relaxed strategies until one succeeds:
 
 | Strategy | Description | Count |
 |----------|-------------|-------|
-| 1. Clean apply | `git apply` — exact match | 34 |
-| 2. Exclude tests | `--exclude '*.test.*'` | 8 |
-| 3. Exclude changelog+tests | `--exclude 'CHANGELOG.md'` + tests | 2 |
-| 4. 3-way merge | `git apply --3way` | 0 |
-| 5. Manual patch | Custom bash/python3 scripts | 17 |
-| **Total** | | **57/57** |
+| 1. Manual patch | Custom bash/python3 scripts | 20 |
+| 2. Clean apply | `git apply` — exact match | 34 |
+| 3. Exclude tests | `--exclude '*.test.*'` | 8 |
+| 4. Exclude changelog+tests | `--exclude 'CHANGELOG.md'` + tests | 2 |
+| 5. 3-way merge | `git apply --3way` | 0 |
+| **Total** | | **64/64** |
+
+Manual patches take priority (Strategy 0) to ensure reliable application of complex, multi-file changes.
 
 ---
 
-## Application Results (v2026.2.23)
+## Cognitive Memory v3
 
-| Category | Count | Notes |
-|----------|-------|-------|
-| Applied (clean) | 34 | Direct `git apply` |
-| Applied (exclude tests) | 8 | Test files excluded |
-| Applied (exclude changelog+tests) | 2 | CHANGELOG context drift |
-| Applied (manual patch) | 13 | Custom scripts for context mismatches |
-| **Total applied** | **57** | **0 failures** |
-| Build output | 771 files | TypeScript compilation |
-| Verification | 5/5 | All checks passed |
+A research-backed enhancement to OpenClaw's `memory-lancedb` plugin. v3 adds entity extraction, enforced RAG with entity boost, and a hybrid capture pipeline on top of the proven v2 cognitive scoring foundation.
 
----
+### v3 Features (NEW)
 
-## Cognitive Memory Patch
+| Feature | What it does |
+|---------|-------------|
+| **Entity Extraction** | Regex NER extracts person, tech, org, project, location entities with canonical URIs (`entity://type/slug`). Turkish + English. Zero dependencies, <5ms. |
+| **Enforced RAG** | Smart memory injection on every prompt. Threshold 0.75, top-K 3, +0.1 score boost per entity overlap. ~600 tokens/prompt. |
+| **Hybrid Capture Pipeline** | 3-layer: heuristic scoring (5 patterns) → decision logic (>=0.5 direct, 0.2-0.5 uncertain) → LLM verify (gpt-4o-mini, ~30% of messages). |
+| **Agent Tagging** | Every memory tagged with `sourceAgent` (hachiko, scout, analyst, etc). Shared pool, agent-specific display in context. |
+| **LLM Verification** | Uncertain captures verified by gpt-4o-mini. Stores `llmVerified` flag and LLM-assigned importance. |
 
-A research-backed enhancement to OpenClaw's `memory-lancedb` plugin that adds cognitive scoring, confidence gating, and memory lifecycle management.
-
-### Features
+### v2 Foundation (Proven)
 
 | Feature | What it does | Evidence |
 |---------|-------------|----------|
-| **Activation Scoring** | Ranks memories by `similarity (50%) + recency x frequency (35%) + importance (15%)` instead of pure vector distance | ACT-R cognitive model ([Anderson et al.](https://doi.org/10.1037/0033-295X.111.4.1036)), Park et al. 2023, Mem0 production |
-| **Confidence Gating** | Returns nothing when best match scores below threshold, preventing irrelevant context injection | Self-RAG (Asai et al., [ICLR 2024](https://arxiv.org/abs/2310.11511)), FLARE (Jiang et al., 2023) |
-| **Semantic Dedup** | Merges near-duplicate memories (0.85 threshold) instead of rejecting at 0.95, updates text to latest version | Standard IR deduplication |
-| **Content Hash Dedup** | sha256-based exact dedup before embedding check, zero-cost rejection of identical memories | Deterministic, no false positives |
-| **Related-To Linking** | Bidirectional links between memories with 0.60-0.84 similarity, surfaced on recall | memU-inspired cross-referencing |
-| **Category-based Decay** | Memories fade at different rates: `preference/entity = never`, `fact = very slow`, `decision = medium`, `other = fast` | MaRS benchmark (Dec 2025, 300 runs), Mem0 production |
+| **Activation Scoring** | Ranks memories by `similarity (50%) + recency x frequency (35%) + importance (15%)` | ACT-R cognitive model ([Anderson et al.](https://doi.org/10.1037/0033-295X.111.4.1036)) |
+| **Confidence Gating** | Returns nothing when best match scores below threshold | Self-RAG ([ICLR 2024](https://arxiv.org/abs/2310.11511)) |
+| **Semantic Dedup** | Merges near-duplicate memories (0.85 threshold), updates text to latest version | Standard IR deduplication |
+| **Content Hash Dedup** | sha256-based exact dedup before embedding check | Deterministic, zero false positives |
+| **Related-To Linking** | Bidirectional links between memories with 0.60-0.84 similarity | Cross-referencing |
+| **Category-based Decay** | `preference/entity = never`, `fact = very slow`, `decision = medium`, `other = fast` | Batch updates (N+1 fix in v3) |
+
+### Schema (v3 — 16 fields)
+
+```
+id, text, vector, importance, category, createdAt, accessCount, lastAccessed,
+stability, state, contentHash, relatedTo, entities, sourceAgent, captureScore, llmVerified
+```
+
+Auto-migration from v1 and v2 schemas (probe-based detection).
 
 ### How It Works
 
 ```
-Query -> Content Hash Check -> Vector Search -> Dormant Filter -> Activation Scoring -> Confidence Gate -> Results (with relatedTo IDs)
-                                                |
-                                score = 0.5 x similarity
-                                      + 0.35 x sigmoid(ln(accessCount) - 0.5 x ln(age))
-                                      + 0.15 x importance
-                                                |
-                                if bestScore < 0.35 -> return nothing (save tokens)
-                                else -> return top-k, update accessCount, boost stability
-```
+Enforced RAG (before_agent_start):
+  Query → Embed → Extract Entities → Vector Search (2x candidates, 0.6 threshold)
+       → Entity Boost (+0.1/overlap) → Filter >= 0.75 → Top-K 3 → Inject Context
 
-Memory lifecycle:
-```
-active -> fading -> dormant
-  |         |
-  +----<----+ (recalled = reactivated, stability x 1.2)
+Capture Pipeline (agent_end):
+  User Messages → Pre-filter → Extract Entities → Heuristic Score
+       → Score >= 0.5: Direct Capture
+       → 0.2-0.5: LLM Verify (gpt-4o-mini) → Capture if approved
+       → < 0.2: Skip
+       → Content Hash Dedup → Semantic Dedup → Store with entities + agent tag
+
+Memory Lifecycle:
+  active → fading → dormant (batch decay, category-based rates)
+    ↑         ↑
+    +----<----+ (recalled = reactivated, stability x 1.2)
 ```
 
 ### Configuration
 
-All options are optional with sensible defaults. Add to your OpenClaw memory config:
-
 ```json
 {
+  "autoRecall": true,
+  "autoCapture": false,
+  "enforcedRag": true,
+  "ragThreshold": 0.75,
+  "ragTopK": 3,
+  "captureMode": "hybrid",
+  "captureLlmModel": "gpt-4o-mini",
   "similarityWeight": 0.50,
   "activationWeight": 0.35,
   "importanceWeight": 0.15,
   "confidenceThreshold": 0.35,
-  "deduplicationThreshold": 0.85,
-  "decayEnabled": true,
-  "decayOnStartup": true
+  "deduplicationThreshold": 0.85
 }
 ```
 
 ### CLI Commands
 
 ```bash
-openclaw ltm decay    # Run decay cycle (transition fading -> dormant)
-openclaw ltm revive <id>  # Reactivate a dormant memory
-openclaw ltm stats    # Show memory count
+openclaw ltm stats        # v3 stats: category/state/agent distribution, entities, LLM verified
+openclaw ltm search <q>   # Search with entity boost
+openclaw ltm decay        # Run batch decay cycle
+openclaw ltm revive <id>  # Reactivate dormant memory
 ```
 
 ### Research
 
 Full analysis in [`research/`](research/):
 
-- **[Scientific Validation](research/scientific-validation.md)** — Evidence review for each technique (ACT-R, Self-RAG, MaRS, Ebbinghaus)
-- **[MSAM Analysis](research/msam-analysis.md)** — Deep dive into Multi-Stream Adaptive Memory, what to keep and what to discard
-- **[Implementation Specs](docs/cognitive-memory-specs.md)** — Detailed PR specifications with pseudocode
+- **[Scientific Validation](research/scientific-validation.md)** — Evidence review (ACT-R, Self-RAG, MaRS, Ebbinghaus)
+- **[MSAM Analysis](research/msam-analysis.md)** — Multi-Stream Adaptive Memory deep dive
+- **[v3 Design](docs/cognitive-memory-specs.md)** — Implementation specs
 
 ---
 
 ## PR Patches
 
-Organized in 5 waves across 57 active patches.
+Organized in 7 waves across 64 active patches.
 
 ### Wave 1: Hand-picked Critical Fixes (7 active)
 Model allowlist, agent routing, PID cleanup, session contention, security hardening.
 
 ### Wave 2: Systematic Scan (8 active)
 Config safety, compaction repair, prompt injection prevention, session crash guards. Includes 2 manual patches for Unicode handling.
+
+### Wave 3: Comprehensive Treliq Scan (19 active)
+2250 PRs scored with Treliq + Haiku. Categories:
+- **Security** (4): prototype pollution, auth header leaks, cron permissions, filename injection
+- **Stability** (5): fetch timeouts, heartbeat dedup, error handling, connection classification
+- **Memory/Session** (4): flush fix, session store, BM25 scoring, stale model info
+- **Gateway/Channel** (6): Discord v2 flags, SSE encoding, oversized messages, WebSocket 429
 
 ### Wave 3: Comprehensive Treliq Scan (19 active)
 2250 PRs scored with Treliq + Haiku. Categories:
@@ -173,12 +191,16 @@ Config safety, compaction repair, prompt injection prevention, session crash gua
 - **Other** (1): archived transcript usage costs
 
 ### Wave 5: Tier 1 Batch (6 active)
-Score >= 80 from curated report. Categories:
-- **Onboarding** (1): fallback install for missing channel plugin
-- **Security** (1): doctor TLS warning for network-exposed gateway
-- **Hooks** (2): sessionKey in hook context, configured model for slug generator
-- **Cron** (1): disable messaging when delivery.mode=none
-- **Merged/Closed** (removed): #24300, #12499, #12792, #23974
+Score >= 80 from curated report. Onboarding fallback, TLS warning, hook context, slug generator model, cron delivery mode.
+
+### Wave 6: Deep Review Batch (4 active)
+Reviewed and approved patches. Gateway stop fix, echo loop prevention, hook agentId enforcement, session corruption prevention, orphan tool result cleanup, cron write drain, BM25 minScore cap, child run finalization, heartbeat transcript preservation.
+
+### Wave 7: High-Risk Manual Patches (3 active)
+Complex multi-file patches requiring custom scripts:
+- **#24840**: env.vars redaction + network failover + CLI cookie-url fix
+- **#25381**: Preserve thinking blocks in latest assistant during compaction (selective from 12-file PR)
+- **#24517**: Shared workspace locking for multi-agent write safety (3 new files)
 
 ### Score Distribution (4051 PRs)
 
@@ -203,11 +225,6 @@ Score >= 80 from curated report. Categories:
 4. Checks if patched PRs have been merged upstream
 5. Updates `scan-registry.json` and pushes to this repo
 
-```bash
-# Cron (5 AM daily)
-0 5 * * * ~/.openclaw/my-patches/nightly-scan.sh >> ~/.openclaw/my-patches/nightly.log 2>&1
-```
-
 ### Post-Update Check
 
 `post-update-check.sh` runs automatically after OpenClaw updates to re-apply patches:
@@ -223,28 +240,27 @@ Score >= 80 from curated report. Categories:
 openclaw-patchkit/
 |-- README.md
 |-- LICENSE                          # MIT
-|-- pr-patches.conf                  # 57 active PR patches (single source of truth)
+|-- pr-patches.conf                  # 64 active PR patches (single source of truth)
 |-- patch-openclaw.sh                # Unified 4-phase orchestrator
 |-- rebuild-with-patches.sh          # Phase 1: source rebuild (5-strategy cascade)
-|-- dist-patches.sh                  # Phase 2: compiled JS patches
+|-- dist-patches.sh                  # Phase 2: compiled JS patches + cognitive memory
 |-- post-update-check.sh             # Auto-patch after OpenClaw updates
 |-- discover-patches.sh              # Scan GitHub for new PRs
 |-- nightly-scan.sh                  # Automated nightly scan + scoring
 |-- scan-registry.json               # 4051 scored PRs with metadata
-|-- manual-patches/                  # 17 complex PR patch scripts + 1 extension
-|   |-- cognitive-memory-patch.sh    # Cognitive Memory enhancement
-|   |-- cognitive-memory-backup/     # Patched + original files
+|-- manual-patches/                  # 20 scripts (19 PR patches + 1 extension)
+|   |-- cognitive-memory-patch.sh    # Cognitive Memory v3 enhancement
+|   |-- cognitive-memory-backup/     # Patched + original files (index.ts, config.ts)
 |   +-- NNNNN-description.sh         # Per-PR manual patches
 |-- docs/
-|   +-- cognitive-memory-specs.md    # Detailed implementation specs
+|   +-- cognitive-memory-specs.md    # Implementation specs
 +-- research/
     |-- scientific-validation.md     # Peer-reviewed evidence
-    +-- msam-analysis.md             # MSAM deep dive & design
+    +-- msam-analysis.md             # MSAM deep dive
 ```
 
 ## Maintenance
 
-Patch count changes over time:
 - PRs **merged upstream** are marked in `pr-patches.conf` and excluded from rebuild
 - PRs **closed upstream** are auto-skipped by the rebuild script
 - Patches with **context conflicts** on new releases get manual patch scripts
