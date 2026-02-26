@@ -4,7 +4,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenClaw Rebuild-with-Patches
 # Clones the installed version, applies open PR patches, builds, swaps dist.
-# Usage: ~/.openclaw/my-patches/rebuild-with-patches.sh [--force]
+# Usage: ~/.openclaw/my-patches/rebuild-with-patches.sh [--force] [--verbose]
 # ─────────────────────────────────────────────────────────────────────────────
 
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,11 +15,15 @@ BASE_TAG="v$(echo "$VERSION" | sed 's/-[0-9]*$//')"
 WORKDIR="/tmp/openclaw-patch-build-$$"
 REPO="https://github.com/openclaw/openclaw.git"
 
-# Handle --discover flag: run discovery first, then rebuild
+# Handle flags
+VERBOSE=false
 if [[ "${1:-}" == "--discover" ]]; then
   shift
   bash "$PATCHES_DIR/discover-patches.sh" --all "$@"
   exit $?
+fi
+if [[ "${1:-}" == "--verbose" ]] || [[ "${2:-}" == "--verbose" ]]; then
+  VERBOSE=true
 fi
 
 RED='\033[0;31m'
@@ -48,41 +52,57 @@ fi
 
 OPEN_PRS=()
 MERGED_PRS=()
+SKIPPED_PRS=()
 TOTAL=0
 
 while IFS='|' read -r pr_num description; do
-  # Skip comments and empty lines
+  # Skip comments, empty lines, and expansion entries
   [[ "$pr_num" =~ ^[[:space:]]*# ]] && continue
   [[ -z "$pr_num" ]] && continue
-  
+  [[ "$pr_num" =~ ^[[:space:]]*EXP- ]] && continue
+  [[ "$pr_num" =~ ^[[:space:]]*FIX- ]] && continue
+
   pr_num=$(echo "$pr_num" | tr -d ' ')
   description=$(echo "$description" | sed 's/^ *//')
   TOTAL=$((TOTAL + 1))
-  
-  # Check if PR is still open
+
+  # If a manual patch script exists, always include (handles internal issues without upstream PRs)
+  if ls "$PATCHES_DIR/manual-patches/${pr_num}-"*.sh 1>/dev/null 2>&1; then
+    state=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.state' 2>/dev/null || echo "unknown")
+    if [ "$state" = "open" ] || [ "$state" = "unknown" ]; then
+      [ "$VERBOSE" = true ] && ok "#$pr_num manual script — will patch"
+      OPEN_PRS+=("$pr_num")
+    elif [ "$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merged' 2>/dev/null || echo "false")" = "true" ]; then
+      [ "$VERBOSE" = true ] && warn "#$pr_num MERGED upstream — $description"
+      MERGED_PRS+=("$pr_num")
+    else
+      [ "$VERBOSE" = true ] && ok "#$pr_num manual script — will patch"
+      OPEN_PRS+=("$pr_num")
+    fi
+    continue
+  fi
+
+  # Check if PR is still open (upstream only)
   state=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.state' 2>/dev/null || echo "unknown")
   merged=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merged' 2>/dev/null || echo "false")
-  
+
   if [ "$merged" = "true" ]; then
-    warn "#$pr_num MERGED upstream — $description"
+    [ "$VERBOSE" = true ] && warn "#$pr_num MERGED upstream — $description"
     MERGED_PRS+=("$pr_num")
   elif [ "$state" = "open" ]; then
-    ok "#$pr_num open — will patch"
+    [ "$VERBOSE" = true ] && ok "#$pr_num open — will patch"
     OPEN_PRS+=("$pr_num")
   else
-    warn "#$pr_num state=$state — skipping"
+    [ "$VERBOSE" = true ] && warn "#$pr_num state=$state — skipping"
+    SKIPPED_PRS+=("$pr_num")
   fi
 done < "$CONF"
 
 echo ""
-info "Total: $TOTAL PRs, ${#OPEN_PRS[@]} to apply, ${#MERGED_PRS[@]} already merged"
+info "Total: $TOTAL PRs | ${#OPEN_PRS[@]} open | ${#MERGED_PRS[@]} merged | ${#SKIPPED_PRS[@]} skipped"
 
 if [ ${#MERGED_PRS[@]} -gt 0 ]; then
-  echo ""
-  warn "These PRs are now merged upstream. Consider updating openclaw and removing them from $CONF:"
-  for pr in "${MERGED_PRS[@]}"; do
-    echo "  - #$pr"
-  done
+  warn "Merged upstream (remove from conf): ${MERGED_PRS[*]}"
 fi
 
 if [ ${#OPEN_PRS[@]} -eq 0 ]; then
@@ -104,6 +124,7 @@ info "Downloading ${#OPEN_PRS[@]} PR diffs..."
 mkdir -p /tmp/oc-pr-diffs
 
 # Download all diffs upfront with rate limiting to avoid GitHub throttling
+DL_OK=0; DL_FAIL=0
 for i in "${!OPEN_PRS[@]}"; do
   pr_num="${OPEN_PRS[$i]}"
   diff_file="/tmp/oc-pr-diffs/${pr_num}.diff"
@@ -115,16 +136,28 @@ for i in "${!OPEN_PRS[@]}"; do
       gh api "repos/openclaw/openclaw/pulls/${pr_num}" --header 'Accept: application/vnd.github.v3.diff' > "$diff_file" 2>/dev/null || true
     fi
   fi
+  # Track download success
+  if [ -s "$diff_file" ] && ! head -1 "$diff_file" 2>/dev/null | grep -q '<!DOCTYPE'; then
+    DL_OK=$((DL_OK + 1))
+  else
+    DL_FAIL=$((DL_FAIL + 1))
+    [ "$VERBOSE" = true ] && warn "#$pr_num diff download failed (404 or rate limited)"
+  fi
   # Pause every 30 downloads to stay under rate limits
   if [ $(( (i + 1) % 30 )) -eq 0 ]; then
     sleep 3
   fi
 done
-ok "Downloaded ${#OPEN_PRS[@]} diffs"
+if [ $DL_FAIL -gt 0 ]; then
+  ok "Downloaded $DL_OK/${#OPEN_PRS[@]} diffs ($DL_FAIL failed — manual-only PRs)"
+else
+  ok "Downloaded ${#OPEN_PRS[@]} diffs"
+fi
 
 APPLIED=0
 FAILED=0
 FAILED_LIST=()
+STRATEGY_COUNTS=([0]=0 [1]=0 [2]=0 [3]=0 [4]=0)  # manual, clean, excl-test, excl-cl+test, 3way
 
 MANUAL_DIR="$PATCHES_DIR/manual-patches"
 
@@ -134,35 +167,35 @@ for pr_num in "${OPEN_PRS[@]}"; do
   # than auto-applying diffs that may have TS errors or context drift)
   if ls "$MANUAL_DIR"/${pr_num}-*.sh 1>/dev/null 2>&1; then
     MANUAL_SCRIPT=$(ls "$MANUAL_DIR"/${pr_num}-*.sh | head -1)
-    info "#$pr_num using manual patch: $(basename "$MANUAL_SCRIPT")"
-    if bash "$MANUAL_SCRIPT" "$WORKDIR" 2>&1 | while read -r line; do echo "    $line"; done; then
-      ok "#$pr_num manual patch applied"
-      APPLIED=$((APPLIED + 1))
+    [ "$VERBOSE" = true ] && info "#$pr_num manual: $(basename "$MANUAL_SCRIPT")"
+    if bash "$MANUAL_SCRIPT" "$WORKDIR" 2>&1 | { if [ "$VERBOSE" = true ]; then while read -r line; do echo "    $line"; done; else cat >/dev/null; fi; }; then
+      [ "$VERBOSE" = true ] && ok "#$pr_num manual patch applied"
+      APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[0]=$((STRATEGY_COUNTS[0] + 1))
     else
-      warn "#$pr_num manual patch FAILED"
+      warn "#$pr_num manual patch FAILED ($(basename "$MANUAL_SCRIPT"))"
       FAILED=$((FAILED + 1))
       FAILED_LIST+=("$pr_num")
     fi
   # Strategy 1: Clean apply
   elif git apply --check "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply "/tmp/oc-pr-diffs/${pr_num}.diff"
-    ok "#$pr_num applied cleanly"
-    APPLIED=$((APPLIED + 1))
+    [ "$VERBOSE" = true ] && ok "#$pr_num applied cleanly"
+    APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[1]=$((STRATEGY_COUNTS[1] + 1))
   # Strategy 2: Apply excluding test files (test context often drifts)
   elif git apply --check --exclude='*.test.*' --exclude='*.e2e.*' "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply --exclude='*.test.*' --exclude='*.e2e.*' "/tmp/oc-pr-diffs/${pr_num}.diff"
-    ok "#$pr_num applied (tests excluded)"
-    APPLIED=$((APPLIED + 1))
+    [ "$VERBOSE" = true ] && ok "#$pr_num applied (tests excluded)"
+    APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[2]=$((STRATEGY_COUNTS[2] + 1))
   # Strategy 2b: Exclude CHANGELOG + tests (CHANGELOG context drifts across versions)
   elif git apply --check --exclude='CHANGELOG.md' --exclude='*.test.*' --exclude='*.e2e.*' --exclude='*.live.*' "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply --exclude='CHANGELOG.md' --exclude='*.test.*' --exclude='*.e2e.*' --exclude='*.live.*' "/tmp/oc-pr-diffs/${pr_num}.diff"
-    ok "#$pr_num applied (changelog+tests excluded)"
-    APPLIED=$((APPLIED + 1))
+    [ "$VERBOSE" = true ] && ok "#$pr_num applied (changelog+tests excluded)"
+    APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[3]=$((STRATEGY_COUNTS[3] + 1))
   # Strategy 3: 3-way merge
   elif git apply --check --3way "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply --3way "/tmp/oc-pr-diffs/${pr_num}.diff"
-    ok "#$pr_num applied with 3way merge"
-    APPLIED=$((APPLIED + 1))
+    [ "$VERBOSE" = true ] && ok "#$pr_num applied with 3way merge"
+    APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[4]=$((STRATEGY_COUNTS[4] + 1))
   else
     warn "#$pr_num failed to apply (no matching strategy)"
     FAILED=$((FAILED + 1))
@@ -171,7 +204,19 @@ for pr_num in "${OPEN_PRS[@]}"; do
 done
 
 echo ""
-info "Applied: $APPLIED, Failed: $FAILED"
+# Build compact strategy breakdown
+STRAT_PARTS=""
+[ "${STRATEGY_COUNTS[0]}" -gt 0 ] && STRAT_PARTS="${STRAT_PARTS}${STRATEGY_COUNTS[0]} manual, "
+[ "${STRATEGY_COUNTS[1]}" -gt 0 ] && STRAT_PARTS="${STRAT_PARTS}${STRATEGY_COUNTS[1]} clean, "
+[ "${STRATEGY_COUNTS[2]}" -gt 0 ] && STRAT_PARTS="${STRAT_PARTS}${STRATEGY_COUNTS[2]} excl-test, "
+[ "${STRATEGY_COUNTS[3]}" -gt 0 ] && STRAT_PARTS="${STRAT_PARTS}${STRATEGY_COUNTS[3]} excl-cl+test, "
+[ "${STRATEGY_COUNTS[4]}" -gt 0 ] && STRAT_PARTS="${STRAT_PARTS}${STRATEGY_COUNTS[4]} 3way, "
+STRAT_PARTS="${STRAT_PARTS%, }"  # trim trailing comma
+
+ok "Applied: $APPLIED/$((APPLIED + FAILED)) ($STRAT_PARTS)"
+if [ $FAILED -gt 0 ]; then
+  warn "Failed: ${FAILED_LIST[*]}"
+fi
 
 if [ $APPLIED -eq 0 ]; then
   fail "No patches applied — aborting build"
@@ -179,17 +224,87 @@ if [ $APPLIED -eq 0 ]; then
   exit 1
 fi
 
+# ── Step 2a-fix: Apply FIX-* manual patch scripts ─────────────────────────────
+FIX_APPLIED=0
+FIX_FAILED=0
+FIX_SCRIPTS=("$MANUAL_DIR"/FIX-*-*.sh)
+
+if [ -f "${FIX_SCRIPTS[0]}" ]; then
+  echo ""
+  info "Applying ${#FIX_SCRIPTS[@]} fix scripts..."
+  for fix_script in "${FIX_SCRIPTS[@]}"; do
+    fix_name=$(basename "$fix_script" .sh)
+    if bash "$fix_script" "$WORKDIR" 2>&1 | { if [ "$VERBOSE" = true ]; then while read -r line; do echo "    $line"; done; else cat >/dev/null; fi; }; then
+      [ "$VERBOSE" = true ] && ok "$fix_name applied"
+      FIX_APPLIED=$((FIX_APPLIED + 1))
+    else
+      warn "$fix_name FAILED"
+      FIX_FAILED=$((FIX_FAILED + 1))
+    fi
+  done
+  ok "Fixes: $FIX_APPLIED/${#FIX_SCRIPTS[@]} applied"
+fi
+
+# ── Step 2b: Apply expansion scripts ─────────────────────────────────────────
+EXP_APPLIED=0
+EXP_FAILED=0
+EXP_FAILED_LIST=()
+EXP_SCRIPTS=("$MANUAL_DIR"/EXP-*-*.sh)
+
+if [ -f "${EXP_SCRIPTS[0]}" ]; then
+  echo ""
+  info "Applying ${#EXP_SCRIPTS[@]} expansion scripts..."
+  for exp_script in "${EXP_SCRIPTS[@]}"; do
+    exp_name=$(basename "$exp_script" .sh)
+    if bash "$exp_script" "$WORKDIR" 2>&1 | { if [ "$VERBOSE" = true ]; then while read -r line; do echo "    $line"; done; else cat >/dev/null; fi; }; then
+      [ "$VERBOSE" = true ] && ok "$exp_name applied"
+      EXP_APPLIED=$((EXP_APPLIED + 1))
+    else
+      warn "$exp_name FAILED"
+      EXP_FAILED=$((EXP_FAILED + 1))
+      EXP_FAILED_LIST+=("$exp_name")
+    fi
+  done
+  ok "Expansions: $EXP_APPLIED/${#EXP_SCRIPTS[@]} applied"
+  if [ $EXP_FAILED -gt 0 ]; then
+    warn "Failed: ${EXP_FAILED_LIST[*]}"
+  fi
+fi
+
 # ── Step 3: Install deps and build ───────────────────────────────────────────
 echo ""
 info "Installing dependencies..."
-pnpm install --frozen-lockfile 2>&1 | tail -2
+set +e
+if [ "$VERBOSE" = true ]; then
+  pnpm install --frozen-lockfile 2>&1 | tail -5
+  INSTALL_EXIT=${PIPESTATUS[0]}
+else
+  pnpm install --frozen-lockfile >/dev/null 2>&1
+  INSTALL_EXIT=$?
+fi
+set -e
+
+if [ "$INSTALL_EXIT" -ne 0 ]; then
+  fail "pnpm install failed (exit $INSTALL_EXIT)"
+  rm -rf "$WORKDIR"
+  exit 1
+fi
+ok "Dependencies installed"
+
+# Fix ownership after pnpm install — rolldown bundler needs write access
+# pnpm install creates root-owned node_modules when running under sudo
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  chown -R "$SUDO_USER" "$WORKDIR"
+fi
 
 info "Building..."
+set +e
 BUILD_OUTPUT=$(pnpm build 2>&1)
 BUILD_EXIT=$?
+set -e
 
 if [ $BUILD_EXIT -ne 0 ]; then
-  fail "Build failed!"
+  fail "Build failed! Last 20 lines:"
   echo "$BUILD_OUTPUT" | tail -20
   rm -rf "$WORKDIR"
   exit 1
@@ -236,9 +351,12 @@ rm -rf /tmp/oc-pr-diffs
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════${NC}"
 echo -e "  ${GREEN}Patched build installed${NC}"
-echo -e "  Version: $VERSION + ${APPLIED} PR patches"
+echo -e "  Version: $VERSION + ${APPLIED} PR patches + ${FIX_APPLIED:-0} fixes + ${EXP_APPLIED:-0} expansions"
 if [ ${#FAILED_LIST[@]} -gt 0 ]; then
   echo -e "  ${YELLOW}Skipped: ${FAILED_LIST[*]}${NC}"
+fi
+if [ "${EXP_FAILED:-0}" -gt 0 ]; then
+  echo -e "  ${YELLOW}Expansion failures: $EXP_FAILED${NC}"
 fi
 echo -e "  Backup:  $BACKUP_DIR"
 echo -e "${CYAN}═══════════════════════════════════════════${NC}"
