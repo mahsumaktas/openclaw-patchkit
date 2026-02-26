@@ -97,6 +97,41 @@ if [ $TLS_DONE -gt 0 ] && [ $TLS_NEEDED -eq 0 ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────
+# PATCH 1b: Carbon GatewayPlugin uncaught exception fix (FIX-A2)
+# @buape/carbon emits "error" on EventEmitter without a handler,
+# causing Node.js uncaught exception on max reconnect attempts.
+# This registers a default no-op error handler to prevent the crash.
+# ─────────────────────────────────────────────────────────────────────
+echo ""
+echo "-- Patch 1b: Carbon GatewayPlugin error handler (FIX-A2) --"
+
+CARBON_GW="$OPENCLAW_ROOT/node_modules/@buape/carbon/dist/src/plugins/gateway/GatewayPlugin.js"
+if [ ! -f "$CARBON_GW" ]; then
+  warn "Carbon GatewayPlugin.js not found, skipping"
+  SKIPPED=$((SKIPPED + 1))
+elif grep -q 'FIX-A2' "$CARBON_GW" 2>/dev/null; then
+  ok "Carbon GatewayPlugin.js: already patched"
+  SKIPPED=$((SKIPPED + 1))
+else
+  if sed -i.bak \
+    's|this.emitter = new EventEmitter();|this.emitter = new EventEmitter(); this.emitter.on("error", () => {}); /* FIX-A2: prevent uncaught exception */|' \
+    "$CARBON_GW" 2>/dev/null; then
+    rm -f "${CARBON_GW}.bak"
+    if grep -q 'FIX-A2' "$CARBON_GW" 2>/dev/null; then
+      ok "Carbon GatewayPlugin.js: patched (no-op error handler)"
+      APPLIED=$((APPLIED + 1))
+    else
+      fail "Carbon GatewayPlugin.js: sed ran but pattern not found"
+      FAILED=$((FAILED + 1))
+    fi
+  else
+    rm -f "${CARBON_GW}.bak"
+    fail "Carbon GatewayPlugin.js: sed patch failed"
+    FAILED=$((FAILED + 1))
+  fi
+fi
+
+# ─────────────────────────────────────────────────────────────────────
 # PATCH 2: Self-signed cert acceptance for wss:// (PR #22682)
 # Adds rejectUnauthorized=false for wss:// connections without fingerprint
 # ─────────────────────────────────────────────────────────────────────
