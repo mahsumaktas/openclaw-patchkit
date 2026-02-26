@@ -22,6 +22,10 @@ MODEL="claude-sonnet-4-6"
 # Load PATH for node/gh
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
+# Load Discord notifications (non-fatal if missing)
+# shellcheck disable=SC1091
+source "$PATCHES_DIR/notify.sh" 2>/dev/null || true
+
 mkdir -p "$WORK"
 
 echo ""
@@ -30,11 +34,30 @@ echo ""
 
 # ── Step 1: Fetch last N days of updated PRs ──────────────────────────────────
 SINCE=$(date -v-${SCAN_DAYS}d '+%Y-%m-%dT00:00:00Z' 2>/dev/null || date -d "${SCAN_DAYS} days ago" '+%Y-%m-%dT00:00:00Z')
-echo "[1/6] Fetching PRs updated since $SINCE..."
+echo "[1/7] Fetching PRs updated since $SINCE..."
 
-gh api graphql --paginate -f query="
+MAX_PAGES=5
+MAX_PRS=500
+CURSOR=""
+> "$WORK/recent-prs.jsonl"
+
+# Load registry for early-exit check
+SCANNED_SET=$(node -e "
+try {
+  const r = JSON.parse(require('fs').readFileSync('$REGISTRY','utf8'));
+  console.log(JSON.stringify(r.scannedPRs || []));
+} catch { console.log('[]'); }
+" 2>/dev/null)
+
+for PAGE in $(seq 1 $MAX_PAGES); do
+  CURSOR_ARG=""
+  if [ -n "$CURSOR" ]; then
+    CURSOR_ARG="-f cursor=$CURSOR"
+  fi
+
+  RESPONSE=$(gh api graphql -f query="
 query(\$cursor: String) {
-  search(query: \"repo:openclaw/openclaw is:pr is:open updated:>=$SINCE\", type: ISSUE, first: 100, after: \$cursor) {
+  search(query: \"repo:openclaw/openclaw is:pr is:open updated:>=$SINCE sort:updated-desc\", type: ISSUE, first: 100, after: \$cursor) {
     pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
@@ -62,13 +85,54 @@ query(\$cursor: String) {
       }
     }
   }
-}" --jq '.data.search.nodes[]' > "$WORK/recent-prs.jsonl" 2>/dev/null
+}" $CURSOR_ARG 2>&1) || { echo "  API error on page $PAGE — stopping."; break; }
+
+  # Extract nodes and append
+  echo "$RESPONSE" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+const nodes=d.data?.search?.nodes||[];
+for(const n of nodes) console.log(JSON.stringify(n));
+" >> "$WORK/recent-prs.jsonl" 2>/dev/null
+
+  # Check pagination
+  HAS_NEXT=$(echo "$RESPONSE" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+console.log(d.data?.search?.pageInfo?.hasNextPage?'true':'false');
+" 2>/dev/null)
+  CURSOR=$(echo "$RESPONSE" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+console.log(d.data?.search?.pageInfo?.endCursor||'');
+" 2>/dev/null)
+
+  CURRENT_COUNT=$(wc -l < "$WORK/recent-prs.jsonl" | tr -d ' ')
+  echo "  Page $PAGE: $CURRENT_COUNT PRs fetched so far"
+
+  # Early exit: check if this page has any unscanned PRs
+  PAGE_NEW=$(echo "$RESPONSE" | node -e "
+const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+const scanned=new Set($SCANNED_SET);
+const nodes=d.data?.search?.nodes||[];
+const newCount=nodes.filter(n=>!n.isDraft&&!scanned.has(n.number)).length;
+console.log(newCount);
+" 2>/dev/null)
+
+  if [ "${PAGE_NEW:-0}" -eq 0 ] && [ "$PAGE" -gt 1 ]; then
+    echo "  No new unscanned PRs on page $PAGE — stopping early."
+    break
+  fi
+
+  if [ "$HAS_NEXT" != "true" ] || [ "$CURRENT_COUNT" -ge "$MAX_PRS" ]; then
+    break
+  fi
+
+  sleep 1  # Rate limit courtesy
+done
 
 TOTAL_RECENT=$(wc -l < "$WORK/recent-prs.jsonl" | tr -d ' ')
-echo "  Found $TOTAL_RECENT recently updated PRs"
+echo "  Found $TOTAL_RECENT recently updated PRs (max $MAX_PRS)"
 
 # ── Step 2: Filter — exclude already fully scanned ────────────────────────────
-echo "[2/6] Filtering against scan registry..."
+echo "[2/7] Filtering against scan registry..."
 
 node -e "
 const fs = require('fs');
@@ -89,25 +153,39 @@ for (const line of confLines) {
   if (m) patched.add(parseInt(m[1]));
 }
 
+// Load previously skipped drafts for re-check
+let skippedDrafts = new Set();
+try {
+  const reg = JSON.parse(fs.readFileSync('$REGISTRY', 'utf8'));
+  skippedDrafts = new Set(reg.skippedDrafts || []);
+} catch {}
+
 const candidates = [];
+const currentDrafts = [];
+
 for (const line of lines) {
   try {
     const pr = JSON.parse(line);
-    if (pr.isDraft) continue;
-    if (patched.has(pr.number)) continue;
-    // Skip if already scanned with Sonnet (check method in registry)
-    if (scannedSet.has(pr.number)) {
-      // But re-scan if it was updated after our last scan
-      // For now, skip — we trust our full scan
+
+    // Track drafts — skip now but re-check next night if they become ready
+    if (pr.isDraft) {
+      currentDrafts.push(pr.number);
       continue;
     }
+
+    // Was this a previously skipped draft that's now ready? Force scan it.
+    const wasDraft = skippedDrafts.has(pr.number);
+
+    if (patched.has(pr.number)) continue;
+    // Skip if already scanned — unless it was a draft we're re-checking
+    if (scannedSet.has(pr.number) && !wasDraft) continue;
 
     const adds = pr.additions || 0;
     const dels = pr.deletions || 0;
     const total = adds + dels;
     const net = Math.abs(adds - dels);
+    // Skip format-only changes (>95% additions or deletions, no real diff)
     if (total >= 10 && total > 0 && (net / total) < 0.05) continue;
-    if (total > 3000) continue;
 
     const ciState = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state || 'UNKNOWN';
     const reviews = (pr.reviews?.nodes || []).map(r => r.state);
@@ -120,6 +198,7 @@ for (const line of lines) {
       additions: adds,
       deletions: dels,
       changedFiles: pr.changedFiles || 0,
+      large: total > 3000,
       ci: ciState,
       approved: reviews.includes('APPROVED'),
       changesReq: reviews.includes('CHANGES_REQUESTED'),
@@ -129,9 +208,22 @@ for (const line of lines) {
       labels: (pr.labels?.nodes || []).map(l => l.name),
       createdAt: pr.createdAt,
       updatedAt: pr.updatedAt,
+      wasDraft: wasDraft,
     });
   } catch {}
 }
+
+// Update skippedDrafts in registry
+try {
+  const reg = JSON.parse(fs.readFileSync('$REGISTRY', 'utf8'));
+  reg.skippedDrafts = currentDrafts;
+  fs.writeFileSync('$REGISTRY', JSON.stringify(reg, null, 2));
+} catch {}
+
+const draftRecovered = candidates.filter(c => c.wasDraft).length;
+const largeCount = candidates.filter(c => c.large).length;
+if (draftRecovered > 0) console.error('  Draft recovered (now ready): ' + draftRecovered);
+if (largeCount > 0) console.error('  Large PRs (>3000 lines, included): ' + largeCount);
 
 fs.writeFileSync('$WORK/new-candidates.json', JSON.stringify(candidates, null, 2));
 console.log(candidates.length);
@@ -145,7 +237,7 @@ if [ "$NEW_COUNT" -eq 0 ]; then
   # Skip to step 4
 else
   # ── Step 3: Score with treliq + Sonnet ──────────────────────────────────────
-  echo "[3/6] Scoring $NEW_COUNT new PRs with Sonnet 4.6..."
+  echo "[3/7] Scoring $NEW_COUNT new PRs with Sonnet 4.6..."
 
   cd "$TRELIQ_DIR"
   set -a && source .env && set +a
@@ -193,10 +285,199 @@ else
   console.log('');
   console.log('Registry updated: ' + results.rankedPRs.length + ' new scores');
   " 2>/dev/null
+
+  # ── Step 3.1: Discord notification for high-value PRs ────────────────────
+  node -e "
+  const fs = require('fs');
+  const results = JSON.parse(fs.readFileSync('$WORK/treliq-results.json', 'utf8'));
+  const notable = results.rankedPRs.filter(p => p.totalScore >= 67).sort((a, b) => b.totalScore - a.totalScore);
+  if (notable.length === 0) process.exit(0);
+  const lines = notable.map(p => {
+    const tier = p.totalScore >= 80 ? 'CRITICAL' : 'HIGH';
+    return '[' + tier + '] **#' + p.number + '** (' + p.totalScore + ') ' + p.title;
+  });
+  fs.writeFileSync('$WORK/discord-notable.txt', lines.join('\n'));
+  console.log(notable.length);
+  " 2>/dev/null > "$WORK/notable-count.txt"
+
+  NOTABLE_COUNT=$(cat "$WORK/notable-count.txt" 2>/dev/null | tr -d ' ')
+  if [ -n "$NOTABLE_COUNT" ] && [ "$NOTABLE_COUNT" -gt 0 ] 2>/dev/null; then
+    NOTABLE_MSG=$(cat "$WORK/discord-notable.txt" 2>/dev/null)
+    notify "Nightly Scan: $NOTABLE_COUNT Notable PRs" "$NOTABLE_MSG" "blue"
+    echo "  Discord: notified $NOTABLE_COUNT notable PRs (score >= 67)"
+  fi
+
+  # ── Step 3.5: Auto-add high-confidence PRs ─────────────────────────────────
+  echo "[3.5/7] Auto-add: checking PRs with score >= 85..."
+
+  AUTO_ADDED=""
+  AUTO_ADD_COUNT=0
+
+  OPENCLAW_ROOT_RESOLVED="$(npm root -g)/openclaw"
+  OPENCLAW_TAG=$(node -e "console.log('v'+require('$OPENCLAW_ROOT_RESOLVED/package.json').version)" 2>/dev/null)
+
+  node -e "
+  const fs = require('fs');
+  const results = JSON.parse(fs.readFileSync('$WORK/treliq-results.json', 'utf8'));
+  const conf = fs.readFileSync('$CONF', 'utf8');
+  const existing = new Set();
+  for (const line of conf.split('\n')) {
+    const m = line.match(/^\s*#?\s*(\d+)\s*\|/);
+    if (m) existing.add(parseInt(m[1]));
+  }
+  const candidates = results.rankedPRs
+    .filter(p => p.totalScore >= 85 && !existing.has(p.number))
+    .sort((a, b) => b.totalScore - a.totalScore);
+  fs.writeFileSync('$WORK/auto-add-candidates.json', JSON.stringify(candidates, null, 2));
+  console.log(candidates.length);
+  " 2>/dev/null > "$WORK/auto-add-count.txt"
+
+  AUTO_CANDIDATE_COUNT=$(cat "$WORK/auto-add-count.txt" 2>/dev/null | tr -d ' ')
+  echo "  Candidates for auto-add: ${AUTO_CANDIDATE_COUNT:-0}"
+
+  if [ -n "$AUTO_CANDIDATE_COUNT" ] && [ "$AUTO_CANDIDATE_COUNT" -gt 0 ] 2>/dev/null; then
+    # Clone source for apply-check (reuse if already cloned)
+    CLONE_DIR="/tmp/openclaw-source-$$"
+    if [ ! -d "$CLONE_DIR" ]; then
+      echo "  Cloning openclaw source ($OPENCLAW_TAG) for apply-check..."
+      git clone --depth 200 --branch "$OPENCLAW_TAG" --single-branch \
+        https://github.com/openclaw/openclaw.git "$CLONE_DIR" 2>/dev/null || {
+          echo "  Clone failed — skipping auto-add."
+          AUTO_CANDIDATE_COUNT=0
+        }
+    fi
+  fi
+
+  if [ -n "$AUTO_CANDIDATE_COUNT" ] && [ "$AUTO_CANDIDATE_COUNT" -gt 0 ] 2>/dev/null && [ -d "${CLONE_DIR:-/nonexistent}" ]; then
+    # Test each candidate with git apply --check
+    node -e "
+    const fs = require('fs');
+    const { execFileSync } = require('child_process');
+    const candidates = JSON.parse(fs.readFileSync('$WORK/auto-add-candidates.json', 'utf8'));
+    const cloneDir = '$CLONE_DIR';
+    const workDir = '$WORK';
+    const passed = [];
+
+    for (const pr of candidates) {
+      const diffFile = workDir + '/pr-' + pr.number + '.diff';
+      try {
+        // Download diff
+        execFileSync('gh', ['pr', 'diff', String(pr.number), '--repo', 'openclaw/openclaw'], {
+          timeout: 30000,
+          stdio: ['pipe', fs.openSync(diffFile, 'w'), 'pipe']
+        });
+        const diffContent = fs.readFileSync(diffFile, 'utf8');
+        if (!diffContent.trim()) continue;
+
+        // Try 4 strategies: clean -> exclude-test -> exclude-changelog+test -> 3way
+        const strategies = [
+          { name: 'clean', excludes: [] },
+          { name: 'exclude-test', excludes: ['**/test/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*'] },
+          { name: 'exclude-changelog+test', excludes: ['**/test/**', '**/__tests__/**', '**/*.test.*', '**/*.spec.*', 'CHANGELOG*', '**/CHANGELOG*'] },
+          { name: '3way', excludes: [], threeWay: true },
+        ];
+
+        let applied = false;
+        for (const strat of strategies) {
+          try {
+            const args = ['apply', '--check'];
+            for (const ex of strat.excludes) args.push('--exclude', ex);
+            if (strat.threeWay) args.push('--3way');
+            args.push(diffFile);
+            execFileSync('git', args, { cwd: cloneDir, timeout: 10000, stdio: 'pipe' });
+            passed.push({ number: pr.number, title: pr.title, score: pr.totalScore, strategy: strat.name, intent: pr.intent || '' });
+            applied = true;
+            break;
+          } catch {}
+        }
+
+        if (!applied) {
+          console.error('  SKIP #' + pr.number + ' — does not apply cleanly');
+        }
+      } catch (e) {
+        console.error('  SKIP #' + pr.number + ' — ' + (e.message || 'unknown error'));
+      }
+    }
+
+    fs.writeFileSync('$WORK/auto-add-passed.json', JSON.stringify(passed, null, 2));
+    console.log(passed.length);
+    " 2>/dev/null > "$WORK/auto-add-passed-count.txt"
+
+    PASSED_COUNT=$(cat "$WORK/auto-add-passed-count.txt" 2>/dev/null | tr -d ' ')
+    echo "  Passed apply-check: ${PASSED_COUNT:-0}"
+
+    if [ -n "$PASSED_COUNT" ] && [ "$PASSED_COUNT" -gt 0 ] 2>/dev/null; then
+      # Add to conf
+      DATE_STAMP=$(date '+%Y-%m-%d')
+      AUTO_ADDED_LIST=$(node -e "
+      const fs = require('fs');
+      const passed = JSON.parse(fs.readFileSync('$WORK/auto-add-passed.json', 'utf8'));
+      const confPath = '$CONF';
+      let conf = fs.readFileSync(confPath, 'utf8');
+
+      const addedNums = [];
+      let newLines = '\n# ── Auto-added: $DATE_STAMP (score >= 85, apply-check passed) ──────────────\n';
+
+      for (const pr of passed) {
+        const stratNote = pr.strategy !== 'clean' ? ' [' + pr.strategy + ']' : '';
+        newLines += pr.number + ' | ' + pr.intent + ': ' + pr.title + stratNote + ' # AUTO-ADDED $DATE_STAMP score=' + pr.score + '\n';
+        addedNums.push(pr.number);
+      }
+
+      conf = conf.trimEnd() + '\n' + newLines;
+      fs.writeFileSync(confPath, conf);
+      console.log(addedNums.join(','));
+      " 2>/dev/null)
+
+      AUTO_ADDED="$AUTO_ADDED_LIST"
+      AUTO_ADD_COUNT=$PASSED_COUNT
+      echo "  Auto-added to conf: $AUTO_ADDED"
+
+      # Rebuild with new patches
+      echo "  Running patch system with new PRs..."
+      sudo "$PATCHES_DIR/patch-openclaw.sh" --skip-restart
+      BUILD_EXIT=$?
+
+      if [ $BUILD_EXIT -eq 0 ]; then
+        echo "  Build successful with auto-added PRs."
+        notify "Auto-Add Success" "**$AUTO_ADD_COUNT PR(s)** auto-added and built:\n$AUTO_ADDED" "green"
+
+        # Restart gateway + health monitor
+        UID_NUM=$(id -u)
+        if launchctl print "gui/$UID_NUM/ai.openclaw.gateway" &>/dev/null; then
+          launchctl kill SIGTERM "gui/$UID_NUM/ai.openclaw.gateway"
+          sleep 2
+          echo "  Gateway restarted."
+        fi
+
+        # Health monitor with rollback tracking
+        if [ -x "$PATCHES_DIR/health-monitor.sh" ]; then
+          nohup bash "$PATCHES_DIR/health-monitor.sh" --auto-added-prs "$AUTO_ADDED" \
+            >> "$PATCHES_DIR/../logs/health-monitor.log" 2>&1 &
+          echo "  Health monitor started with rollback tracking."
+        fi
+      else
+        echo "  Build FAILED with auto-added PRs — rolling back..."
+        # Rollback: comment out auto-added lines
+        IFS=',' read -ra ROLLBACK_LIST <<< "$AUTO_ADDED"
+        for pr in "${ROLLBACK_LIST[@]}"; do
+          sed -i '' "s/^${pr} /# BUILD-FAIL: ${pr} /" "$CONF" 2>/dev/null || true
+        done
+        # Rebuild without them
+        sudo "$PATCHES_DIR/patch-openclaw.sh" --skip-restart 2>/dev/null || true
+        notify "Auto-Add Build Failed" "Build failed after adding: $AUTO_ADDED\nRolled back. Manual review needed." "red"
+        AUTO_ADD_COUNT=0
+        AUTO_ADDED=""
+      fi
+    fi
+
+    # Cleanup clone
+    rm -rf "${CLONE_DIR:-/tmp/nonexistent}" 2>/dev/null || true
+  fi
 fi
 
 # ── Step 4: Check upstream merges ─────────────────────────────────────────────
-echo "[4/6] Checking upstream merges..."
+echo "[4/7] Checking upstream merges..."
 
 MERGED_PRS=()
 CLOSED_PRS=()
@@ -219,14 +500,17 @@ done < "$CONF"
 
 if [ ${#MERGED_PRS[@]} -gt 0 ]; then
   echo "  ${#MERGED_PRS[@]} PR(s) merged upstream — removing from patches"
+  MERGED_LIST=""
   for pr in "${MERGED_PRS[@]}"; do
     # Comment out the line in conf
     sed -i '' "s/^${pr} /# ${pr} | MERGED UPSTREAM — /" "$CONF"
+    MERGED_LIST="${MERGED_LIST}#${pr} "
   done
+  notify "PRs Merged Upstream" "${#MERGED_PRS[@]} PR(s) merged and removed from patches:\n$MERGED_LIST" "green"
 fi
 
 # ── Step 5: Update patchkit repo ──────────────────────────────────────────────
-echo "[5/6] Updating patchkit repo..."
+echo "[5/7] Updating patchkit repo..."
 
 if [ -d "$PATCHKIT_DIR/.git" ]; then
   cd "$PATCHKIT_DIR"
@@ -236,6 +520,11 @@ if [ -d "$PATCHKIT_DIR/.git" ]; then
   cp "$REGISTRY" "$PATCHKIT_DIR/scan-registry.json"
   cp "$PATCHES_DIR/rebuild-with-patches.sh" "$PATCHKIT_DIR/"
   cp "$PATCHES_DIR/discover-patches.sh" "$PATCHKIT_DIR/"
+  cp "$PATCHES_DIR/notify.sh" "$PATCHKIT_DIR/"
+  cp "$PATCHES_DIR/health-monitor.sh" "$PATCHKIT_DIR/"
+  cp "$PATCHES_DIR/post-update-check.sh" "$PATCHKIT_DIR/"
+  cp "$PATCHES_DIR/nightly-scan.sh" "$PATCHKIT_DIR/"
+  cp "$PATCHES_DIR/install-sudoers.sh" "$PATCHKIT_DIR/"
   cp -r "$PATCHES_DIR/manual-patches" "$PATCHKIT_DIR/" 2>/dev/null || true
 
   # Update README stats
@@ -275,7 +564,12 @@ if [ -d "$PATCHKIT_DIR/.git" ]; then
       MERGE_MSG=", ${#MERGED_PRS[@]} merged upstream"
     fi
 
-    git commit -m "nightly: ${DATE} scan${NEW_MSG}${MERGE_MSG}
+    AUTO_MSG=""
+    if [ "${AUTO_ADD_COUNT:-0}" -gt 0 ]; then
+      AUTO_MSG=", $AUTO_ADD_COUNT auto-added"
+    fi
+
+    git commit -m "nightly: ${DATE} scan${NEW_MSG}${MERGE_MSG}${AUTO_MSG}
 
 ${PATCH_COUNT} active patches, ${SCORED_COUNT} PRs scored total
 $CHANGES" --no-verify 2>/dev/null
@@ -288,12 +582,13 @@ else
   echo "  Patchkit repo not found at $PATCHKIT_DIR — skipping"
 fi
 
-# ── Step 6: Summary ──────────────────────────────────────────────────────────
+# ── Step 7: Summary ──────────────────────────────────────────────────────────
 echo ""
-echo "[6/6] === NIGHTLY SCAN COMPLETE ==="
+echo "[7/7] === NIGHTLY SCAN COMPLETE ==="
 echo "  Date: $(date '+%Y-%m-%d %H:%M')"
 echo "  Recent PRs checked: $TOTAL_RECENT"
 echo "  New PRs scored: ${NEW_COUNT:-0}"
+echo "  Auto-added: ${AUTO_ADD_COUNT:-0}"
 echo "  Merged upstream: ${#MERGED_PRS[@]}"
 echo "  Closed upstream: ${#CLOSED_PRS[@]}"
 echo ""

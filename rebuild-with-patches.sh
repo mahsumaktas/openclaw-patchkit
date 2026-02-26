@@ -100,8 +100,27 @@ git checkout -b patched-build 2>/dev/null
 
 # ── Step 2: Download and apply PR diffs ──────────────────────────────────────
 echo ""
-info "Downloading PR diffs..."
+info "Downloading ${#OPEN_PRS[@]} PR diffs..."
 mkdir -p /tmp/oc-pr-diffs
+
+# Download all diffs upfront with rate limiting to avoid GitHub throttling
+for i in "${!OPEN_PRS[@]}"; do
+  pr_num="${OPEN_PRS[$i]}"
+  diff_file="/tmp/oc-pr-diffs/${pr_num}.diff"
+  if [ ! -s "$diff_file" ] || head -1 "$diff_file" 2>/dev/null | grep -q '<!DOCTYPE'; then
+    curl -sL "https://github.com/openclaw/openclaw/pull/${pr_num}.diff" > "$diff_file"
+    # Validate: retry once with gh api if curl returned HTML (rate limited)
+    if head -1 "$diff_file" 2>/dev/null | grep -q '<!DOCTYPE'; then
+      sleep 2
+      gh api "repos/openclaw/openclaw/pulls/${pr_num}" --header 'Accept: application/vnd.github.v3.diff' > "$diff_file" 2>/dev/null || true
+    fi
+  fi
+  # Pause every 30 downloads to stay under rate limits
+  if [ $(( (i + 1) % 30 )) -eq 0 ]; then
+    sleep 3
+  fi
+done
+ok "Downloaded ${#OPEN_PRS[@]} diffs"
 
 APPLIED=0
 FAILED=0
@@ -110,11 +129,22 @@ FAILED_LIST=()
 MANUAL_DIR="$PATCHES_DIR/manual-patches"
 
 for pr_num in "${OPEN_PRS[@]}"; do
-  diff_url="https://github.com/openclaw/openclaw/pull/${pr_num}.diff"
-  curl -sL "$diff_url" > "/tmp/oc-pr-diffs/${pr_num}.diff"
 
+  # Strategy 0: Manual patch script takes priority (handcrafted fixes are more reliable
+  # than auto-applying diffs that may have TS errors or context drift)
+  if ls "$MANUAL_DIR"/${pr_num}-*.sh 1>/dev/null 2>&1; then
+    MANUAL_SCRIPT=$(ls "$MANUAL_DIR"/${pr_num}-*.sh | head -1)
+    info "#$pr_num using manual patch: $(basename "$MANUAL_SCRIPT")"
+    if bash "$MANUAL_SCRIPT" "$WORKDIR" 2>&1 | while read -r line; do echo "    $line"; done; then
+      ok "#$pr_num manual patch applied"
+      APPLIED=$((APPLIED + 1))
+    else
+      warn "#$pr_num manual patch FAILED"
+      FAILED=$((FAILED + 1))
+      FAILED_LIST+=("$pr_num")
+    fi
   # Strategy 1: Clean apply
-  if git apply --check "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
+  elif git apply --check "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
     git apply "/tmp/oc-pr-diffs/${pr_num}.diff"
     ok "#$pr_num applied cleanly"
     APPLIED=$((APPLIED + 1))
@@ -133,18 +163,6 @@ for pr_num in "${OPEN_PRS[@]}"; do
     git apply --3way "/tmp/oc-pr-diffs/${pr_num}.diff"
     ok "#$pr_num applied with 3way merge"
     APPLIED=$((APPLIED + 1))
-  # Strategy 4: Manual patch script
-  elif ls "$MANUAL_DIR"/${pr_num}-*.sh 1>/dev/null 2>&1; then
-    MANUAL_SCRIPT=$(ls "$MANUAL_DIR"/${pr_num}-*.sh | head -1)
-    info "#$pr_num using manual patch: $(basename "$MANUAL_SCRIPT")"
-    if bash "$MANUAL_SCRIPT" "$WORKDIR" 2>&1 | while read -r line; do echo "    $line"; done; then
-      ok "#$pr_num manual patch applied"
-      APPLIED=$((APPLIED + 1))
-    else
-      warn "#$pr_num manual patch FAILED"
-      FAILED=$((FAILED + 1))
-      FAILED_LIST+=("$pr_num")
-    fi
   else
     warn "#$pr_num failed to apply (no matching strategy)"
     FAILED=$((FAILED + 1))

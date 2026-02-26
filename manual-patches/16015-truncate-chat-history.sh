@@ -89,10 +89,15 @@ sed -i.bak 's|const sanitized = stripEnvelopeFromMessages(sliced);|const sanitiz
   src/gateway/server-methods/chat.ts
 
 # 4. Update the next line to use truncated instead of sanitized
+# This depends on what follows - adapt to actual code
 python3 -c "
 with open('src/gateway/server-methods/chat.ts', 'r') as f:
     content = f.read()
+# Replace first occurrence of variable name after truncated is introduced
+# The line after should reference sanitized -> truncated
 import re
+# Find: truncated = truncateMessages...\n    const XXX = someFunc(sanitized
+# Replace sanitized with truncated in the next line
 content = re.sub(
     r'(const truncated = truncateMessagesForChatHistory\(sanitized\);\n\s+const \w+ = \w+\()sanitized(\))',
     r'\1truncated\2',

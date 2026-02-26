@@ -9,11 +9,15 @@ cd "$1"
 FILE="src/config/sessions/store.ts"
 
 # In updateLastRoute, replace loadSessionStore(storePath) with skipCache variant.
+# We target the specific pattern inside updateLastRoute (after withSessionStoreLock).
+# The function is identified by the surrounding context.
 python3 -c "
 import re
 with open('$FILE', 'r') as f:
     content = f.read()
 
+# Find updateLastRoute function and fix the loadSessionStore call inside it
+# Pattern: inside withSessionStoreLock callback, loadSessionStore without skipCache
 old = '''return await withSessionStoreLock(storePath, async () => {
     const store = loadSessionStore(storePath);
     const existing = store[sessionKey];

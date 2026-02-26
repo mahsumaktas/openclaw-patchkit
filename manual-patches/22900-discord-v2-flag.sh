@@ -34,5 +34,5 @@ else:
     print('SKIP: flags pattern not found or already applied')
 "
 
-rm -f \"\${FILE}.bak\"
-echo \"Applied PR #22900 - discord v2 components flag\"
+rm -f "${FILE}.bak"
+echo "Applied PR #22900 - discord v2 components flag"

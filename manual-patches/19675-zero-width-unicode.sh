@@ -42,13 +42,16 @@ code = code.replace(
 );
 
 // 3. Replace 'return content;' with 'return stripped;' inside replaceMarkers only
+// The first 'return content;' is the early return after regex check
+// The second is after replacements.length === 0
+// We need to replace both occurrences AFTER replaceMarkers function starts
 const markerIdx = code.indexOf('function replaceMarkers');
 const before = code.substring(0, markerIdx);
 let after = code.substring(markerIdx);
 after = after.replace(/return content;/g, 'return stripped;');
 
 // Also replace content.slice with stripped.slice in the same function
-after = after.replace(/content\\.slice\\(cursor/g, 'stripped.slice(cursor');
+after = after.replace(/content\.slice\(cursor/g, 'stripped.slice(cursor');
 
 code = before + after;
 
