@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # PR #27021: fix(typing): add keepalive failsafe timer
 # Typing indicator sonsuz keepalive'a girerse 120s sonra otomatik durduruyor.
+#
+# BUG FIX (2026-02-26): Original PR re-arms failsafe on every onReplyStart() call.
+# createTypingController's 6s typingLoop calls onReplyStart() every tick, which
+# resets the 120s timer endlessly — failsafe never fires.
+# Fix: if failsafe is already armed, don't re-arm. Only arm on first call.
+# fireStop() clears failsafeTimer, so next fresh onReplyStart() re-arms correctly.
+#
 # 2 dosya: typing.ts (+30/-0), typing.test.ts (+30/-0)
 set -euo pipefail
 
@@ -68,8 +75,10 @@ new3 = """\
     if (maxKeepaliveMs <= 0) {
       return;
     }
+    // Don't re-arm if already armed — outer typingLoop calls onReplyStart every 6s
+    // which would reset the timer endlessly, making the failsafe never fire.
     if (failsafeTimer) {
-      clearTimeout(failsafeTimer);
+      return;
     }
     failsafeTimer = setTimeout(() => {
       // Don't close the callback entirely; just stop this run's keepalive.
