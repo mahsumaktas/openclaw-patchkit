@@ -174,13 +174,6 @@ Config safety, compaction repair, prompt injection prevention, session crash gua
 - **Memory/Session** (4): flush fix, session store, BM25 scoring, stale model info
 - **Gateway/Channel** (6): Discord v2 flags, SSE encoding, oversized messages, WebSocket 429
 
-### Wave 3: Comprehensive Treliq Scan (19 active)
-2250 PRs scored with Treliq + Haiku. Categories:
-- **Security** (4): prototype pollution, auth header leaks, cron permissions, filename injection
-- **Stability** (5): fetch timeouts, heartbeat dedup, error handling, connection classification
-- **Memory/Session** (4): flush fix, session store, BM25 scoring, stale model info
-- **Gateway/Channel** (6): Discord v2 flags, SSE encoding, oversized messages, WebSocket 429
-
 ### Wave 4: Sonnet 4.6 Full Scan (17 active)
 4051 PRs re-scored with Sonnet 4.6. Categories:
 - **Security** (1): auth rate limiting
