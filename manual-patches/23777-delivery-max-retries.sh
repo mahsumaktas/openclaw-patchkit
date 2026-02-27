@@ -54,6 +54,7 @@ export async function failDelivery(id: string, error: string, stateDir?: string)
   const raw = await fs.promises.readFile(filePath, "utf-8");
   const entry: QueuedDelivery = JSON.parse(raw);
   entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
   entry.lastError = error;
   const tmp = `${filePath}.${process.pid}.tmp`;
   await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
@@ -75,6 +76,7 @@ export async function failDelivery(id: string, error: string, stateDir?: string)
   const raw = await fs.promises.readFile(filePath, "utf-8");
   const entry: QueuedDelivery = JSON.parse(raw);
   entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
   entry.lastError = error;
 
   // auto-move to failed/ on max retries or permanent error (#23777)

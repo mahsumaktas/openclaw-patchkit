@@ -1,0 +1,45 @@
+{
+  "version": "2026.2.26",
+  "timestamp": "2026-02-27T12:27:17.026Z",
+  "duration_seconds": 269,
+  "phases": {
+    "Phase 1 (Source Rebuild)": {
+      "status": "OK",
+      "summary": "rebuild completed"
+    },
+    "Phase 2 (Dist Patches)": {
+      "status": "OK",
+      "summary": "all dist patches applied"
+    },
+    "Phase 3 (Extensions)": {
+      "status": "OK",
+      "summary": "cognitive-memory applied"
+    }
+  },
+  "verification": {
+    "passed": 5,
+    "total": 5,
+    "checks": [
+      {
+        "name": "entry.js exists",
+        "passed": true
+      },
+      {
+        "name": "TLS probe patched",
+        "passed": true
+      },
+      {
+        "name": "Self-signed cert patched",
+        "passed": true
+      },
+      {
+        "name": "Cognitive memory patched",
+        "passed": true
+      },
+      {
+        "name": "openclaw --version",
+        "passed": true
+      }
+    ]
+  }
+}

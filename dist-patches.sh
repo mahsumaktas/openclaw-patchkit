@@ -336,6 +336,45 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────
+# PATCH 5: Disable #28258 stream wrapper (safety net)
+# wrapAnthropicStreamWithRecovery strips response.result() from the
+# stream object, causing agent-loop.js:187 crash-loop.
+# This patch comments out the wrapper call if present in any dist file.
+# ─────────────────────────────────────────────────────────────────────
+echo ""
+echo "-- Patch 5: Disable #28258 stream wrapper (safety net) --"
+
+P5_DISABLED=0
+P5_CLEAN=0
+WRAPPER_PATTERN='if (params.provider === "anthropic") activeSession.agent.streamFn = wrapAnthropicStreamWithRecovery'
+WRAPPER_DISABLED='/* DISABLED #28258 */ //'
+
+for f in "$DIST"/*.js; do
+  [ -f "$f" ] || continue
+  if grep -q "$WRAPPER_PATTERN" "$f" 2>/dev/null; then
+    # Check if already disabled
+    if grep -q "DISABLED #28258" "$f" 2>/dev/null; then
+      P5_CLEAN=$((P5_CLEAN + 1))
+      continue
+    fi
+    sed -i.bak "s|$WRAPPER_PATTERN|$WRAPPER_DISABLED $WRAPPER_PATTERN|g" "$f" 2>/dev/null
+    rm -f "${f}.bak"
+    P5_DISABLED=$((P5_DISABLED + 1))
+  fi
+done
+
+if [ $P5_DISABLED -gt 0 ]; then
+  ok "#28258 wrapper disabled in $P5_DISABLED file(s)"
+  APPLIED=$((APPLIED + P5_DISABLED))
+elif [ $P5_CLEAN -gt 0 ]; then
+  ok "#28258 wrapper: already disabled ($P5_CLEAN files)"
+  SKIPPED=$((SKIPPED + 1))
+else
+  ok "#28258 wrapper: not present in dist (clean)"
+  SKIPPED=$((SKIPPED + 1))
+fi
+
+# ─────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────
 echo ""

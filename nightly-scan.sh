@@ -7,7 +7,14 @@ set -euo pipefail
 # checks merged upstream, updates patchkit repo.
 #
 # Cron: 0 5 * * * ~/.openclaw/my-patches/nightly-scan.sh >> ~/.openclaw/my-patches/nightly.log 2>&1
+#
+# STABILITY-FIRST POLICY:
+#   Auto-add only stability intents (bugfix, security, crash, reliability).
+#   Feature/refactor PRs: notify-only, require manual approval.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Stability-first: intents eligible for auto-add (all others = manual)
+STABILITY_INTENTS="bugfix|fix|crash|security|hardening|reliability|resilience|recovery|guard|defense|sanitize|prevent"
 
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$PATCHES_DIR/pr-patches.conf"
@@ -16,6 +23,7 @@ TRELIQ_DIR="$HOME/clawd/projects/treliq"
 PATCHKIT_DIR="$HOME/openclaw-patchkit"
 WORK="/tmp/openclaw-nightly-$$"
 LOG="$PATCHES_DIR/nightly.log"
+FEATURE_DEFERRED_COUNT=0
 SCAN_DAYS=3
 MODEL="claude-sonnet-4-6"
 
@@ -55,7 +63,11 @@ for PAGE in $(seq 1 $MAX_PAGES); do
     CURSOR_ARG="-f cursor=$CURSOR"
   fi
 
-  RESPONSE=$(gh api graphql -f query="
+  # Retry API calls up to 3 times with backoff (handles transient network/rate-limit errors)
+  API_OK=false
+  for ATTEMPT in 1 2 3; do
+    API_ERR=""
+    RESPONSE=$(gh api graphql -f query="
 query(\$cursor: String) {
   search(query: \"repo:openclaw/openclaw is:pr is:open updated:>=$SINCE sort:updated-desc\", type: ISSUE, first: 100, after: \$cursor) {
     pageInfo { hasNextPage endCursor }
@@ -85,7 +97,19 @@ query(\$cursor: String) {
       }
     }
   }
-}" $CURSOR_ARG 2>&1) || { echo "  API error on page $PAGE — stopping."; break; }
+}" $CURSOR_ARG 2>"$WORK/api-err-$PAGE.txt") && API_OK=true && break
+    API_ERR=$(cat "$WORK/api-err-$PAGE.txt" 2>/dev/null | head -3)
+    BACKOFF=$((ATTEMPT * 15))
+    echo "  API error on page $PAGE attempt $ATTEMPT/3: ${API_ERR:-unknown error}"
+    echo "  Retrying in ${BACKOFF}s..."
+    sleep $BACKOFF
+  done
+
+  if [ "$API_OK" != "true" ]; then
+    echo "  API failed after 3 attempts on page $PAGE — stopping."
+    echo "  Last error: ${API_ERR:-unknown}"
+    break
+  fi
 
   # Extract nodes and append
   echo "$RESPONSE" | node -e "
@@ -286,16 +310,29 @@ else
   console.log('Registry updated: ' + results.rankedPRs.length + ' new scores');
   " 2>/dev/null
 
-  # ── Step 3.1: Discord notification for high-value PRs ────────────────────
+  # ── Step 3.1: Discord notification with stability-first classification ────
   node -e "
   const fs = require('fs');
   const results = JSON.parse(fs.readFileSync('$WORK/treliq-results.json', 'utf8'));
   const notable = results.rankedPRs.filter(p => p.totalScore >= 67).sort((a, b) => b.totalScore - a.totalScore);
   if (notable.length === 0) process.exit(0);
+
+  const stabilityRe = /^(${STABILITY_INTENTS})$/i;
   const lines = notable.map(p => {
     const tier = p.totalScore >= 80 ? 'CRITICAL' : 'HIGH';
-    return '[' + tier + '] **#' + p.number + '** (' + p.totalScore + ') ' + p.title;
+    const intent = (p.intent || 'unknown').toLowerCase();
+    const isStability = stabilityRe.test(intent);
+    const tag = isStability ? 'STABILITY' : 'FEATURE';
+    const autoEligible = isStability ? ' [auto-eligible]' : ' [manual-only]';
+    return '[' + tier + '] [' + tag + '] **#' + p.number + '** (' + p.totalScore + ') ' + p.title + autoEligible;
   });
+
+  const stabilityCount = notable.filter(p => stabilityRe.test((p.intent || '').toLowerCase())).length;
+  const featureCount = notable.length - stabilityCount;
+  const summary = 'Stability: ' + stabilityCount + ' | Feature: ' + featureCount + ' (feature PRs require manual approval)';
+  lines.unshift(summary);
+  lines.unshift('');
+
   fs.writeFileSync('$WORK/discord-notable.txt', lines.join('\n'));
   console.log(notable.length);
   " 2>/dev/null > "$WORK/notable-count.txt"
@@ -303,15 +340,18 @@ else
   NOTABLE_COUNT=$(cat "$WORK/notable-count.txt" 2>/dev/null | tr -d ' ')
   if [ -n "$NOTABLE_COUNT" ] && [ "$NOTABLE_COUNT" -gt 0 ] 2>/dev/null; then
     NOTABLE_MSG=$(cat "$WORK/discord-notable.txt" 2>/dev/null)
-    notify "Nightly Scan: $NOTABLE_COUNT Notable PRs" "$NOTABLE_MSG" "blue"
+    notify "Nightly Scan: $NOTABLE_COUNT Notable PRs (Stability-First)" "$NOTABLE_MSG" "blue"
     echo "  Discord: notified $NOTABLE_COUNT notable PRs (score >= 67)"
   fi
 
-  # ── Step 3.5: Auto-add high-confidence PRs ─────────────────────────────────
-  echo "[3.5/7] Auto-add: checking PRs with score >= 85..."
+  # ── Step 3.5: Auto-add high-confidence STABILITY PRs ────────────────────────
+  # STABILITY-FIRST: Only bugfix/security/crash PRs can be auto-added.
+  # Feature/refactor PRs are notified but require manual approval.
+  echo "[3.5/7] Auto-add: checking STABILITY PRs with score >= 85..."
 
   AUTO_ADDED=""
   AUTO_ADD_COUNT=0
+  FEATURE_DEFERRED_COUNT=0
 
   OPENCLAW_ROOT_RESOLVED="$(npm root -g)/openclaw"
   OPENCLAW_TAG=$(node -e "console.log('v'+require('$OPENCLAW_ROOT_RESOLVED/package.json').version)" 2>/dev/null)
@@ -325,15 +365,43 @@ else
     const m = line.match(/^\s*#?\s*(\d+)\s*\|/);
     if (m) existing.add(parseInt(m[1]));
   }
-  const candidates = results.rankedPRs
+
+  const stabilityRe = /^(${STABILITY_INTENTS})$/i;
+  const highScore = results.rankedPRs
     .filter(p => p.totalScore >= 85 && !existing.has(p.number))
     .sort((a, b) => b.totalScore - a.totalScore);
+
+  // Stability-first gate: only stability intents auto-add
+  const candidates = [];
+  const deferred = [];
+  for (const p of highScore) {
+    const intent = (p.intent || 'unknown').toLowerCase();
+    if (stabilityRe.test(intent)) {
+      candidates.push(p);
+    } else {
+      deferred.push(p);
+    }
+  }
+
   fs.writeFileSync('$WORK/auto-add-candidates.json', JSON.stringify(candidates, null, 2));
-  console.log(candidates.length);
+  fs.writeFileSync('$WORK/auto-add-deferred.json', JSON.stringify(deferred, null, 2));
+  // Output: eligible,deferred
+  console.log(candidates.length + ',' + deferred.length);
   " 2>/dev/null > "$WORK/auto-add-count.txt"
 
-  AUTO_CANDIDATE_COUNT=$(cat "$WORK/auto-add-count.txt" 2>/dev/null | tr -d ' ')
-  echo "  Candidates for auto-add: ${AUTO_CANDIDATE_COUNT:-0}"
+  AUTO_COUNTS=$(cat "$WORK/auto-add-count.txt" 2>/dev/null | tr -d ' ')
+  AUTO_CANDIDATE_COUNT=$(echo "$AUTO_COUNTS" | cut -d',' -f1)
+  FEATURE_DEFERRED_COUNT=$(echo "$AUTO_COUNTS" | cut -d',' -f2)
+  echo "  Stability candidates for auto-add: ${AUTO_CANDIDATE_COUNT:-0}"
+  if [ "${FEATURE_DEFERRED_COUNT:-0}" -gt 0 ] 2>/dev/null; then
+    echo "  Feature/refactor PRs deferred (manual-only): $FEATURE_DEFERRED_COUNT"
+    # Notify about deferred feature PRs
+    DEFERRED_MSG=$(node -e "
+    const d=JSON.parse(require('fs').readFileSync('$WORK/auto-add-deferred.json','utf8'));
+    console.log(d.map(p=>'#'+p.number+' ('+p.totalScore+') '+p.intent+': '+p.title).join('\n'));
+    " 2>/dev/null)
+    notify "Stability-First: $FEATURE_DEFERRED_COUNT Feature PR(s) Need Manual Review" "$DEFERRED_MSG\n\nThese scored >= 85 but are feature/refactor — not auto-added per stability-first policy." "yellow"
+  fi
 
   if [ -n "$AUTO_CANDIDATE_COUNT" ] && [ "$AUTO_CANDIDATE_COUNT" -gt 0 ] 2>/dev/null; then
     # Clone source for apply-check (reuse if already cloned)
@@ -433,10 +501,12 @@ else
       AUTO_ADD_COUNT=$PASSED_COUNT
       echo "  Auto-added to conf: $AUTO_ADDED"
 
-      # Rebuild with new patches
+      # Rebuild with new patches (set +e so rollback runs on failure)
       echo "  Running patch system with new PRs..."
-      sudo "$PATCHES_DIR/patch-openclaw.sh" --skip-restart
+      set +e
+      sudo bash "$PATCHES_DIR/patch-openclaw.sh" --skip-restart
       BUILD_EXIT=$?
+      set -e
 
       if [ $BUILD_EXIT -eq 0 ]; then
         echo "  Build successful with auto-added PRs."
@@ -464,7 +534,7 @@ else
           sed -i '' "s/^${pr} /# BUILD-FAIL: ${pr} /" "$CONF" 2>/dev/null || true
         done
         # Rebuild without them
-        sudo "$PATCHES_DIR/patch-openclaw.sh" --skip-restart 2>/dev/null || true
+        sudo bash "$PATCHES_DIR/patch-openclaw.sh" --skip-restart 2>/dev/null || true
         notify "Auto-Add Build Failed" "Build failed after adding: $AUTO_ADDED\nRolled back. Manual review needed." "red"
         AUTO_ADD_COUNT=0
         AUTO_ADDED=""
@@ -588,9 +658,11 @@ echo "[7/7] === NIGHTLY SCAN COMPLETE ==="
 echo "  Date: $(date '+%Y-%m-%d %H:%M')"
 echo "  Recent PRs checked: $TOTAL_RECENT"
 echo "  New PRs scored: ${NEW_COUNT:-0}"
-echo "  Auto-added: ${AUTO_ADD_COUNT:-0}"
+echo "  Auto-added (stability only): ${AUTO_ADD_COUNT:-0}"
+echo "  Feature PRs deferred (manual): ${FEATURE_DEFERRED_COUNT:-0}"
 echo "  Merged upstream: ${#MERGED_PRS[@]}"
 echo "  Closed upstream: ${#CLOSED_PRS[@]}"
+echo "  Policy: STABILITY-FIRST (feature/refactor PRs require manual approval)"
 echo ""
 
 rm -rf "$WORK"
