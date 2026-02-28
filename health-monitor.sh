@@ -109,7 +109,7 @@ if ! gateway_is_running; then
 fi
 
 ELAPSED=0
-CRASH_DETECTED=false
+CRASH_COUNT=0
 
 while [ $ELAPSED -lt $CHECK_DURATION ]; do
     sleep "$CHECK_INTERVAL"
@@ -118,17 +118,51 @@ while [ $ELAPSED -lt $CHECK_DURATION ]; do
     if gateway_is_running; then
         echo "  [${ELAPSED}s] Gateway OK (PID: $(get_gateway_pid))"
     else
-        echo "  [${ELAPSED}s] CRASH DETECTED — gateway is not running!"
-        CRASH_DETECTED=true
-        break
+        CRASH_COUNT=$((CRASH_COUNT + 1))
+        echo "  [${ELAPSED}s] CRASH DETECTED (#$CRASH_COUNT) — gateway is not running!"
+
+        # 3+ crashes → dist-level rollback, stop monitoring
+        if [ "$CRASH_COUNT" -ge 3 ]; then
+            break
+        fi
+
+        # Under 3 crashes → log and wait for launchd SuccessfulExit restart
+        echo "  Waiting for launchd auto-restart..."
+        sleep 5
     fi
 done
 
 # ── Result ────────────────────────────────────────────────────────────────────
-if $CRASH_DETECTED; then
+if [ "$CRASH_COUNT" -ge 3 ]; then
     echo ""
-    echo "=== ROLLBACK INITIATED ==="
-    notify "Gateway Crash Detected" "Gateway crashed within ${ELAPSED}s of restart.\nRolling back: ${AUTO_ADDED_PRS:-nothing to rollback}" "red"
+    echo "=== CRITICAL: $CRASH_COUNT CRASHES — AUTO-ROLLBACK ==="
+    notify "Gateway Critical Crash" "Gateway crashed $CRASH_COUNT times post-patch.\nTriggering dist-level auto-rollback." "red"
+
+    if $DRY_RUN; then
+        echo "  [DRY-RUN] Would run: sudo patch-openclaw.sh --rollback"
+    else
+        echo "  Triggering dist-level rollback..."
+        sudo "$PATCHES_DIR/patch-openclaw.sh" --rollback
+        local_exit=$?
+        if [ $local_exit -ne 0 ]; then
+            echo "  WARNING: Dist rollback failed (exit $local_exit)" >&2
+            notify "Dist Rollback Failed" "Auto-rollback failed (exit $local_exit).\nManual intervention needed." "red"
+        else
+            notify "Dist Rollback Complete" "Gateway rolled back to previous dist backup after $CRASH_COUNT crashes." "yellow"
+        fi
+    fi
+
+    # Also disable auto-added PRs if any
+    if [ -n "$AUTO_ADDED_PRS" ]; then
+        rollback_auto_added
+    fi
+    exit 1
+elif [ "$CRASH_COUNT" -gt 0 ]; then
+    # 1-2 crashes detected but monitoring period ended without hitting 3
+    echo ""
+    echo "=== PARTIAL INSTABILITY ==="
+    echo "  $CRASH_COUNT crash(es) detected during monitoring."
+    notify "Gateway Unstable" "Gateway crashed $CRASH_COUNT time(s) during monitoring.\nRolling back auto-added PRs as precaution." "yellow"
 
     rollback_auto_added
     rebuild_and_restart

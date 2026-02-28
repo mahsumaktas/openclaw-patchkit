@@ -1,12 +1,24 @@
 # Secrets
 .env
+*.key
+*.pem
 
 # Logs
 *.log
+!retired-patches.log
 logs/
 
 # Temp
 /tmp/
+*.retirement-bak
 
-# Dist backups
+# Dist backups (large, not needed in repo)
 dist-backup-*/
+
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~

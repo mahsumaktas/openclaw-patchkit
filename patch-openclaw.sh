@@ -11,6 +11,7 @@ set -euo pipefail
 #   patch-openclaw.sh --force             # Force re-run (pass to rebuild)
 #   patch-openclaw.sh --skip-restart      # Don't prompt for gateway restart
 #   patch-openclaw.sh --dry-run           # Show what would happen
+#   patch-openclaw.sh --rollback           # Rollback dist to latest backup
 #   patch-openclaw.sh --status            # Show last run report
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ FORCE_FLAG=""
 SKIP_RESTART=false
 DRY_RUN=false
 SHOW_STATUS=false
+ROLLBACK_MODE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --skip-restart) SKIP_RESTART=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --status)  SHOW_STATUS=true; shift ;;
+    --rollback) ROLLBACK_MODE=true; shift ;;
     --all)     PHASE=""; shift ;;
     *)         echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -78,6 +81,44 @@ if [ "$SHOW_STATUS" = true ]; then
       console.log('    ' + ci + ' ' + c.name);
     }
   "
+  exit 0
+fi
+
+# ── --rollback: restore dist from latest backup ──────────────────────────────
+if [ "$ROLLBACK_MODE" = true ]; then
+  echo ""
+  echo -e "${CYAN}=== ROLLBACK MODE ===${NC}"
+  INSTALL_DIR="$OPENCLAW_ROOT"
+
+  # Find latest dist backup
+  LATEST_BACKUP=$(ls -td "$INSTALL_DIR/dist-backup-"* 2>/dev/null | head -1)
+
+  if [ -z "$LATEST_BACKUP" ]; then
+    fail "No dist backup found for rollback"
+    exit 1
+  fi
+
+  BACKUP_VERSION=$(basename "$LATEST_BACKUP" | sed 's/dist-backup-//')
+  info "Rolling back to: $BACKUP_VERSION"
+  info "Backup source: $LATEST_BACKUP"
+
+  # Dist swap (root-owned directory)
+  DIST_DIR="$INSTALL_DIR/dist"
+  sudo find "$DIST_DIR" -mindepth 1 -delete
+  sudo cp -R "$LATEST_BACKUP/." "$DIST_DIR/"
+
+  ok "Dist rolled back to $BACKUP_VERSION"
+
+  # Gateway restart (launchctl, NOT kill -9)
+  launchctl kill SIGTERM "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
+  sleep 2
+  launchctl kickstart "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
+
+  # Log rollback
+  echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ROLLBACK to $BACKUP_VERSION" >> "$PATCHES_DIR/retired-patches.log"
+
+  ok "Gateway restarted. Rollback complete."
+  echo ""
   exit 0
 fi
 

@@ -53,6 +53,7 @@ fi
 OPEN_PRS=()
 MERGED_PRS=()
 SKIPPED_PRS=()
+RETIRED_COUNT=0
 TOTAL=0
 
 while IFS='|' read -r pr_num description; do
@@ -73,8 +74,18 @@ while IFS='|' read -r pr_num description; do
       [ "$VERBOSE" = true ] && ok "#$pr_num manual script — will patch"
       OPEN_PRS+=("$pr_num")
     elif [ "$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merged' 2>/dev/null || echo "false")" = "true" ]; then
-      [ "$VERBOSE" = true ] && warn "#$pr_num MERGED upstream — $description"
+      _manual_name=$(ls "$PATCHES_DIR/manual-patches/${pr_num}-"*.sh 2>/dev/null | head -1 | xargs basename 2>/dev/null || echo 'n/a')
+      warn "[RETIRED] PR #$pr_num merged upstream — skipping (manual: $_manual_name)"
       MERGED_PRS+=("$pr_num")
+      # Log retirement
+      MERGED_SHA=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merge_commit_sha' 2>/dev/null | head -c 7)
+      echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) RETIRED #$pr_num merged_sha:${MERGED_SHA:-unknown} desc:${description:-}" \
+        >> "$PATCHES_DIR/retired-patches.log"
+      # Mark in conf file
+      if grep -q "^${pr_num}" "$CONF" 2>/dev/null; then
+        sed -i.retirement-bak "s/^${pr_num}/# RETIRED($(date +%Y-%m-%d)): ${pr_num}/" "$CONF"
+      fi
+      RETIRED_COUNT=$((RETIRED_COUNT + 1))
     else
       [ "$VERBOSE" = true ] && ok "#$pr_num manual script — will patch"
       OPEN_PRS+=("$pr_num")
@@ -87,8 +98,17 @@ while IFS='|' read -r pr_num description; do
   merged=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merged' 2>/dev/null || echo "false")
 
   if [ "$merged" = "true" ]; then
-    [ "$VERBOSE" = true ] && warn "#$pr_num MERGED upstream — $description"
+    warn "[RETIRED] PR #$pr_num merged upstream — skipping"
     MERGED_PRS+=("$pr_num")
+    # Log retirement
+    MERGED_SHA=$(gh api "repos/openclaw/openclaw/pulls/$pr_num" --jq '.merge_commit_sha' 2>/dev/null | head -c 7)
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) RETIRED #$pr_num merged_sha:${MERGED_SHA:-unknown} desc:${description:-}" \
+      >> "$PATCHES_DIR/retired-patches.log"
+    # Mark in conf file
+    if grep -q "^${pr_num}" "$CONF" 2>/dev/null; then
+      sed -i.retirement-bak "s/^${pr_num}/# RETIRED($(date +%Y-%m-%d)): ${pr_num}/" "$CONF"
+    fi
+    RETIRED_COUNT=$((RETIRED_COUNT + 1))
   elif [ "$state" = "open" ]; then
     [ "$VERBOSE" = true ] && ok "#$pr_num open — will patch"
     OPEN_PRS+=("$pr_num")
@@ -102,7 +122,7 @@ echo ""
 info "Total: $TOTAL PRs | ${#OPEN_PRS[@]} open | ${#MERGED_PRS[@]} merged | ${#SKIPPED_PRS[@]} skipped"
 
 if [ ${#MERGED_PRS[@]} -gt 0 ]; then
-  warn "Merged upstream (remove from conf): ${MERGED_PRS[*]}"
+  warn "Retired (merged upstream): ${MERGED_PRS[*]} — logged to retired-patches.log"
 fi
 
 if [ ${#OPEN_PRS[@]} -eq 0 ]; then
@@ -352,6 +372,9 @@ echo ""
 echo -e "${CYAN}═══════════════════════════════════════════${NC}"
 echo -e "  ${GREEN}Patched build installed${NC}"
 echo -e "  Version: $VERSION + ${APPLIED} PR patches + ${FIX_APPLIED:-0} fixes + ${EXP_APPLIED:-0} expansions"
+if [ "$RETIRED_COUNT" -gt 0 ]; then
+  echo -e "  ${YELLOW}Retired (merged upstream): $RETIRED_COUNT${NC}"
+fi
 if [ ${#FAILED_LIST[@]} -gt 0 ]; then
   echo -e "  ${YELLOW}Skipped: ${FAILED_LIST[*]}${NC}"
 fi

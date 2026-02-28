@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure GH_TOKEN is available for cron (keyring inaccessible)
+if [[ -z "${GH_TOKEN:-}" ]]; then
+    GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+    export GH_TOKEN
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenClaw Nightly Scan
 # Runs at 5 AM daily via cron. Scans last 3 days of PRs, scores with Sonnet,
@@ -557,6 +563,9 @@ while IFS='|' read -r pr_num rest; do
   [[ -z "$pr_num" ]] && continue
   pr_num=$(echo "$pr_num" | tr -d ' ')
 
+  # Skip non-numeric entries (FIX-*, EXP-*, DISABLED, etc)
+  [[ ! "$pr_num" =~ ^[0-9]+$ ]] && continue
+
   STATE=$(gh pr view "$pr_num" --repo openclaw/openclaw --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
 
   if [ "$STATE" = "MERGED" ]; then
@@ -566,6 +575,9 @@ while IFS='|' read -r pr_num rest; do
     CLOSED_PRS+=("$pr_num")
     echo "  CLOSED: #$pr_num"
   fi
+
+  # Rate limit protection (GitHub API: 5000/hr for authenticated, ~119 patches × 1s ≈ 2min)
+  sleep 1
 done < "$CONF"
 
 if [ ${#MERGED_PRS[@]} -gt 0 ]; then

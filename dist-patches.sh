@@ -18,7 +18,7 @@ set -euo pipefail
 
 OPENCLAW_ROOT="$(npm root -g)/openclaw"
 DIST="$OPENCLAW_ROOT/dist"
-EXT_DIR="$OPENCLAW_ROOT/extensions/memory-lancedb"
+EXT_DIR="$HOME/.openclaw/extensions/memory-lancedb"
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="$PATCHES_DIR/manual-patches/cognitive-memory-backup"
 
