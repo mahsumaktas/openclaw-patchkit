@@ -507,44 +507,17 @@ else
       AUTO_ADD_COUNT=$PASSED_COUNT
       echo "  Auto-added to conf: $AUTO_ADDED"
 
-      # Rebuild with new patches (set +e so rollback runs on failure)
-      echo "  Running patch system with new PRs..."
-      set +e
-      sudo bash "$PATCHES_DIR/patch-openclaw.sh" --skip-restart
-      BUILD_EXIT=$?
-      set -e
-
-      if [ $BUILD_EXIT -eq 0 ]; then
-        echo "  Build successful with auto-added PRs."
-        notify "Auto-Add Success" "**$AUTO_ADD_COUNT PR(s)** auto-added and built:\n$AUTO_ADDED" "green"
-
-        # Restart gateway + health monitor
-        UID_NUM=$(id -u)
-        if launchctl print "gui/$UID_NUM/ai.openclaw.gateway" &>/dev/null; then
-          launchctl kill SIGTERM "gui/$UID_NUM/ai.openclaw.gateway"
-          sleep 2
-          echo "  Gateway restarted."
-        fi
-
-        # Health monitor with rollback tracking
-        if [ -x "$PATCHES_DIR/health-monitor.sh" ]; then
-          nohup bash "$PATCHES_DIR/health-monitor.sh" --auto-added-prs "$AUTO_ADDED" \
-            >> "$PATCHES_DIR/../logs/health-monitor.log" 2>&1 &
-          echo "  Health monitor started with rollback tracking."
-        fi
-      else
-        echo "  Build FAILED with auto-added PRs — rolling back..."
-        # Rollback: comment out auto-added lines
-        IFS=',' read -ra ROLLBACK_LIST <<< "$AUTO_ADDED"
-        for pr in "${ROLLBACK_LIST[@]}"; do
-          sed -i '' "s/^${pr} /# BUILD-FAIL: ${pr} /" "$CONF" 2>/dev/null || true
-        done
-        # Rebuild without them
-        sudo bash "$PATCHES_DIR/patch-openclaw.sh" --skip-restart 2>/dev/null || true
-        notify "Auto-Add Build Failed" "Build failed after adding: $AUTO_ADDED\nRolled back. Manual review needed." "red"
-        AUTO_ADD_COUNT=0
-        AUTO_ADDED=""
-      fi
+      # v2: No live build. PRs already passed sandbox apply-check above.
+      # Full rebuild is done manually via upgrade-openclaw.sh (replaces patch-openclaw.sh).
+      ADDED_DETAIL=$(node -e "
+      const fs = require('fs');
+      const passed = JSON.parse(fs.readFileSync('$WORK/auto-add-passed.json', 'utf8'));
+      console.log(passed.map(p => '**#' + p.number + '** (' + p.score + ') [' + (p.strategy || 'clean') + '] ' + p.title).join('\n'));
+      " 2>/dev/null)
+      notify "Auto-Add: $AUTO_ADD_COUNT PR(s) Added to conf" \
+        "Sandbox apply-check passed. Run \`upgrade-openclaw.sh\` to build.\n\n$ADDED_DETAIL" \
+        "blue"
+      echo "  Discord notified. No live build — run upgrade-openclaw.sh to apply."
     fi
 
     # Cleanup clone

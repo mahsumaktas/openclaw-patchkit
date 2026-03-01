@@ -16,7 +16,16 @@ set -euo pipefail
 # Exit code = number of failed patches (0 = all OK)
 # ─────────────────────────────────────────────────────────────────────────────
 
-OPENCLAW_ROOT="$(npm root -g)/openclaw"
+# npm root -g can resolve to Cellar symlink; prefer /opt/homebrew/lib if it exists
+_npm_root="$(npm root -g)/openclaw"
+if [ -d "/opt/homebrew/lib/node_modules/openclaw/dist" ]; then
+  OPENCLAW_ROOT="/opt/homebrew/lib/node_modules/openclaw"
+elif [ -d "$_npm_root/dist" ]; then
+  OPENCLAW_ROOT="$_npm_root"
+else
+  echo "ERROR: Cannot find OpenClaw dist directory" >&2
+  exit 1
+fi
 DIST="$OPENCLAW_ROOT/dist"
 EXT_DIR="$HOME/.openclaw/extensions/memory-lancedb"
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -371,6 +380,43 @@ elif [ $P5_CLEAN -gt 0 ]; then
   SKIPPED=$((SKIPPED + 1))
 else
   ok "#28258 wrapper: not present in dist (clean)"
+  SKIPPED=$((SKIPPED + 1))
+fi
+
+# ─────────────────────────────────────────────────────────────────────
+# Patch 6: Fix session-recovery dropping valid messages with unsigned thinking
+# Root cause: Sonnet 4.6 low-thinking sends thinking blocks without 'signature'
+# field. assessLastAssistantMessage() treats these as "incomplete-thinking" and
+# drops the entire assistant message — causing Oracle to re-answer questions.
+# Fix: Only drop if unsigned thinking exists WITHOUT any non-thinking content.
+# ─────────────────────────────────────────────────────────────────────
+
+echo "-- Patch 6: Fix unsigned thinking drop (repeat-answer bug) --"
+
+P6_FIXED=0
+P6_CLEAN=0
+HELPERS_PATTERN='if (hasUnsignedThinking) return "incomplete-thinking";'
+HELPERS_FIXED='if (hasUnsignedThinking \&\& !hasNonThinkingContent) return "incomplete-thinking";'
+
+for f in "$DIST"/pi-embedded-helpers-*.js; do
+  [ -f "$f" ] || continue
+  if grep -qF 'if (hasUnsignedThinking) return "incomplete-thinking";' "$f" 2>/dev/null; then
+    sed -i.bak 's/if (hasUnsignedThinking) return "incomplete-thinking";/if (hasUnsignedThinking \&\& !hasNonThinkingContent) return "incomplete-thinking";/g' "$f" 2>/dev/null
+    rm -f "${f}.bak"
+    P6_FIXED=$((P6_FIXED + 1))
+  elif grep -qF 'hasUnsignedThinking && !hasNonThinkingContent' "$f" 2>/dev/null; then
+    P6_CLEAN=$((P6_CLEAN + 1))
+  fi
+done
+
+if [ $P6_FIXED -gt 0 ]; then
+  ok "Unsigned thinking drop fixed in $P6_FIXED file(s)"
+  APPLIED=$((APPLIED + P6_FIXED))
+elif [ $P6_CLEAN -gt 0 ]; then
+  ok "Unsigned thinking fix: already applied ($P6_CLEAN files)"
+  SKIPPED=$((SKIPPED + 1))
+else
+  warn "Unsigned thinking pattern not found in dist"
   SKIPPED=$((SKIPPED + 1))
 fi
 
