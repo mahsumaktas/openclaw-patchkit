@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensure GH_TOKEN is available for cron (keyring inaccessible)
+# Ensure GH_TOKEN is available for cron (macOS Keychain inaccessible when screen locked)
+# Priority: env var > file > gh auth token (Keychain, unreliable in cron)
 if [[ -z "${GH_TOKEN:-}" ]]; then
-    GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+    TOKEN_FILE="${HOME}/.config/gh/.token"
+    if [[ -f "$TOKEN_FILE" ]]; then
+        IFS= read -r GH_TOKEN < "$TOKEN_FILE"
+    else
+        GH_TOKEN="$(gh auth token 2>/dev/null || true)"
+    fi
     export GH_TOKEN
+fi
+
+if [[ -z "${GH_TOKEN:-}" ]]; then
+    echo "FATAL: No GitHub token available. Run: gh auth token > ${TOKEN_FILE} && chmod 600 ${TOKEN_FILE}" >&2
+    exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

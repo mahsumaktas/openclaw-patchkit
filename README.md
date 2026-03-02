@@ -2,6 +2,23 @@
 
 Production-tested patch management system for OpenClaw. Provides atomic upgrades, runtime monkey-patches, and symlink-based instant rollback.
 
+## Why Patchkit?
+
+OpenClaw ships as a compiled Node.js application. Out of the box, you get whatever the release includes — bugs, limitations, and all. You wait for the next release and hope your issue is fixed.
+
+Patchkit changes this. It applies community-contributed patches (from unmerged PRs) **on top of** the official release, giving you fixes and improvements weeks or months before they ship upstream.
+
+| | Stock OpenClaw | OpenClaw + Patchkit |
+|---|---|---|
+| **Bug fixes** | Wait for next release | Apply today from PR |
+| **Gateway stability** | Stock error handling | Runtime patches (TLS, Carbon, stream safety) |
+| **Upgrades** | Manual npm install, hope nothing breaks | Atomic swap + 60s health probe + auto-rollback |
+| **Rollback** | "Did you make a backup?" | `--rollback` (1ms symlink switch) |
+| **Patch tracking** | Manual, per-machine | `pr-patches.conf` with categories, risk levels, auto-retirement |
+| **New patches** | You find them yourself | Nightly scan scores 500 PRs with AI, reports to Discord |
+
+**Current state:** 101 active patches + 3 platform fixes on OpenClaw v2026.3.1. Running in production since February 2026.
+
 ## Architecture
 
 ```

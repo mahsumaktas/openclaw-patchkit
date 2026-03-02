@@ -9,7 +9,15 @@ set -euo pipefail
 
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$PATCHES_DIR/pr-patches.conf"
-OPENCLAW_ROOT="$(npm root -g)/openclaw"
+# Resolve symlink for in-place editing (macOS sed -i fails on symlinks)
+[ -L "$CONF" ] && CONF=$(readlink "$CONF")
+# Resolve actual openclaw root from binary symlink (npm root -g may return wrong path on Homebrew)
+_OC_BIN=$(which openclaw 2>/dev/null || true)
+if [ -n "$_OC_BIN" ] && [ -L "$_OC_BIN" ]; then
+  OPENCLAW_ROOT=$(cd "$(dirname "$_OC_BIN")/$(dirname "$(readlink "$_OC_BIN")")" && pwd)
+else
+  OPENCLAW_ROOT="$(npm root -g)/openclaw"
+fi
 VERSION=$(node -e "console.log(require('$OPENCLAW_ROOT/package.json').version)")
 BASE_TAG="v$(echo "$VERSION" | sed 's/-[0-9]*$//')"
 WORKDIR="/tmp/openclaw-patch-build-$$"

@@ -47,8 +47,10 @@ for sym in ['MAX_RETRIES', 'isPermanentDeliveryError', 'moveToFailed']:
         sys.exit(1)
 
 # ── Replace failDelivery to add max-retry and permanent-error auto-move ──────
+# Dual-pattern: virgin source OR post-#23672 (try-catch wrapped readFile+JSON.parse)
 
-old = """/** Update a queue entry after a failed delivery attempt. */
+# Pattern A: virgin v2026.3.1 source
+old_virgin = """/** Update a queue entry after a failed delivery attempt. */
 export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
   const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
   const raw = await fs.promises.readFile(filePath, "utf-8");
@@ -64,7 +66,30 @@ export async function failDelivery(id: string, error: string, stateDir?: string)
   await fs.promises.rename(tmp, filePath);
 }"""
 
-new = """/** Update a queue entry after a failed delivery attempt.
+# Pattern B: post-#23672 (try-catch wrapped readFile+JSON.parse)
+old_post23672 = """/** Update a queue entry after a failed delivery attempt. */
+export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
+  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+  let entry: QueuedDelivery;
+  try {
+    const raw = await fs.promises.readFile(filePath, "utf-8");
+    entry = JSON.parse(raw);
+  } catch {
+    return; // File missing or corrupted — skip update
+  }
+  entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
+  entry.lastError = error;
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  await fs.promises.rename(tmp, filePath);
+}"""
+
+# Replacement for virgin source (no try-catch)
+new_virgin = """/** Update a queue entry after a failed delivery attempt.
  *
  * If the entry has exceeded MAX_RETRIES or the error matches a known permanent
  * failure pattern, the entry is auto-moved to failed/ so it stops being retried
@@ -101,15 +126,62 @@ export async function failDelivery(id: string, error: string, stateDir?: string)
   await fs.promises.rename(tmp, filePath);
 }"""
 
-if old not in code:
-    print("    FAIL: #23777 cannot find failDelivery function body", file=sys.stderr)
-    sys.exit(1)
+# Replacement for post-#23672 (preserves try-catch from #23672)
+new_post23672 = """/** Update a queue entry after a failed delivery attempt.
+ *
+ * If the entry has exceeded MAX_RETRIES or the error matches a known permanent
+ * failure pattern, the entry is auto-moved to failed/ so it stops being retried
+ * during normal operation — not just during gateway-restart recovery.
+ * @see https://github.com/openclaw/openclaw/issues/23777
+ */
+export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
+  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+  let entry: QueuedDelivery;
+  try {
+    const raw = await fs.promises.readFile(filePath, "utf-8");
+    entry = JSON.parse(raw);
+  } catch {
+    return; // File missing or corrupted — skip update
+  }
+  entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
+  entry.lastError = error;
 
-code = code.replace(old, new, 1)
+  // auto-move to failed/ on max retries or permanent error (#23777)
+  if (entry.retryCount >= MAX_RETRIES || isPermanentDeliveryError(error)) {
+    // Persist updated entry first (retryCount + lastError for audit trail)
+    const tmp = `${filePath}.${process.pid}.tmp`;
+    await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
+    await fs.promises.rename(tmp, filePath);
+    // Move to failed/ subdirectory
+    await moveToFailed(id, stateDir);
+    return;
+  }
+
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
+  await fs.promises.rename(tmp, filePath);
+}"""
+
+# Try virgin pattern first, then post-#23672
+if old_virgin in code:
+    code = code.replace(old_virgin, new_virgin, 1)
+    print("    OK: #23777 failDelivery patched (virgin source)")
+elif old_post23672 in code:
+    code = code.replace(old_post23672, new_post23672, 1)
+    print("    OK: #23777 failDelivery patched (post-#23672 try-catch preserved)")
+else:
+    print("    FAIL: #23777 cannot find failDelivery function body (neither virgin nor post-#23672)", file=sys.stderr)
+    sys.exit(1)
 
 with open(filepath, "w") as f:
     f.write(code)
-print("    OK: #23777 failDelivery now auto-moves entries to failed/ on max retries or permanent error")
 
 PYEOF
 
