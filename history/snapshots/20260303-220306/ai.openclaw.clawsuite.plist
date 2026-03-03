@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.openclaw.clawsuite</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/mahsum/clawsuite/scripts/start.sh</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/mahsum/clawsuite</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/Users/mahsum</string>
+		<key>PATH</key>
+		<string>/Users/mahsum/.volta/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+		<key>NODE_TLS_REJECT_UNAUTHORIZED</key>
+		<string>0</string>
+	</dict>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/mahsum/.openclaw/logs/clawsuite.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/mahsum/.openclaw/logs/clawsuite.err.log</string>
+</dict>
+</plist>

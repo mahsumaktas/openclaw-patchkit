@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# patchkit — OpenClaw patchkit management CLI
+# Unified interface for patch management, upgrades, and maintenance
+#
+# Usage:
+#   patchkit status              — Show patch dashboard
+#   patchkit add <PR_NUMBER>     — Add a new PR patch
+#   patchkit remove <PR_NUMBER>  — Retire a patch
+#   patchkit upgrade <VERSION>   — Upgrade OpenClaw with patches
+#   patchkit diff <VERSION>      — Pre-upgrade conflict analysis
+#   patchkit doctor              — System health check
+#   patchkit validate-fixes      — Validate FIX patch patterns
+#   patchkit disable-builtins    — Disable conflicting built-in extensions
+
+PATCHKIT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PATCHKIT_ROOT
+
+# Source common library
+source "$PATCHKIT_ROOT/lib/common.sh"
+
+COMMAND="${1:-help}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+  status)
+    source "$PATCHKIT_ROOT/commands/status.sh"
+    cmd_status "$@"
+    ;;
+  add)
+    source "$PATCHKIT_ROOT/commands/add.sh"
+    cmd_add "$@"
+    ;;
+  remove)
+    source "$PATCHKIT_ROOT/commands/remove.sh"
+    cmd_remove "$@"
+    ;;
+  upgrade)
+    if [ -f "$PATCHKIT_ROOT/commands/upgrade.sh" ]; then
+      source "$PATCHKIT_ROOT/commands/upgrade.sh"
+      cmd_upgrade "$@"
+    else
+      fail "upgrade command not yet implemented"
+      exit 1
+    fi
+    ;;
+  diff)
+    if [ -f "$PATCHKIT_ROOT/commands/diff.sh" ]; then
+      source "$PATCHKIT_ROOT/commands/diff.sh"
+      cmd_diff "$@"
+    else
+      fail "diff command not yet implemented"
+      exit 1
+    fi
+    ;;
+  doctor)
+    if [ -f "$PATCHKIT_ROOT/commands/doctor.sh" ]; then
+      source "$PATCHKIT_ROOT/commands/doctor.sh"
+      cmd_doctor "$@"
+    else
+      fail "doctor command not yet implemented"
+      exit 1
+    fi
+    ;;
+  validate-fixes)
+    source "$PATCHKIT_ROOT/lib/fix-validate.sh"
+    validate_all_fixes "$@"
+    ;;
+  disable-builtins)
+    source "$PATCHKIT_ROOT/lib/builtin-disable.sh"
+    disable_builtin_extensions
+    ;;
+  verify-builtins)
+    source "$PATCHKIT_ROOT/lib/builtin-disable.sh"
+    verify_builtin_disabled
+    ;;
+  help|--help|-h)
+    echo -e "${BOLD}patchkit${NC} — OpenClaw patchkit management CLI"
+    echo ""
+    echo "Commands:"
+    echo "  status              Show patch dashboard (counts, categories, health)"
+    echo "  add <PR_NUMBER>     Add a new PR patch (fetch, categorize, risk assess)"
+    echo "  remove <PR_NUMBER>  Retire a patch (archive, update metadata)"
+    echo "  upgrade <VERSION>   Full upgrade pipeline with auto-rollback"
+    echo "  diff <VERSION>      Pre-upgrade conflict analysis"
+    echo "  doctor              System health check"
+    echo "  validate-fixes      Validate FIX patch patterns against current dist"
+    echo "  disable-builtins    Disable conflicting built-in extensions"
+    echo "  verify-builtins     Verify built-in extensions are properly disabled"
+    echo ""
+    echo "Current: OpenClaw v$(get_openclaw_version)"
+    echo "Patches: $(yaml_count "$PATCHES_YAML" ".patches") active"
+    ;;
+  *)
+    fail "Unknown command: $COMMAND"
+    echo "Run 'patchkit help' for usage."
+    exit 1
+    ;;
+esac

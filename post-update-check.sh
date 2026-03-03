@@ -29,7 +29,7 @@ echo "OpenClaw version changed ($VERSION) or first run — running unified patch
 notify "Patch Triggered" "OpenClaw updated to **$VERSION** — applying patches..." "blue"
 
 # Run with sudo (passwordless via /etc/sudoers.d/openclaw-patchkit)
-sudo "$PATCHES_DIR/patch-openclaw.sh" --skip-restart
+sudo "$PATCHES_DIR/rebuild-with-patches.sh" --skip-restart
 PATCH_EXIT=$?
 
 # Write version marker as current user (not root)
@@ -58,8 +58,8 @@ if [ $PATCH_EXIT -eq 0 ]; then
         echo "Health monitor started (PID $!)."
     fi
 else
-    echo "Patches partially applied for $VERSION (check: patch-openclaw.sh --status)" >&2
-    notify "Patch Partial Failure" "OpenClaw **$VERSION** — some patches failed.\nRun \`patch-openclaw.sh --status\` for details." "yellow"
+    echo "Patches partially applied for $VERSION (check: rebuild-with-patches.sh --status)" >&2
+    notify "Patch Partial Failure" "OpenClaw **$VERSION** — some patches failed.\nRun \`rebuild-with-patches.sh --status\` for details." "yellow"
 fi
 
 exit $PATCH_EXIT

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>ai.openclaw.gateway</string>
+    
+    <key>Comment</key>
+    <string>OpenClaw Gateway (v2026.2.26)</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/opt/homebrew/bin/node</string>
+      <string>/opt/homebrew/lib/node_modules/openclaw/dist/index.js</string>
+      <string>gateway</string>
+      <string>--port</string>
+      <string>28643</string>
+    </array>
+    
+    <key>StandardOutPath</key>
+    <string>/Users/mahsum/.openclaw/logs/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mahsum/.openclaw/logs/gateway.err.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+    <key>HOME</key>
+    <string>/Users/mahsum</string>
+    <key>TMPDIR</key>
+    <string>/var/folders/rt/w3tspmtd695g7dl3lzw22j4c0000gn/T/</string>
+    <key>PATH</key>
+    <string>/Users/mahsum/.bun/bin:/Users/mahsum/.local/bin:/Users/mahsum/.npm-global/bin:/Users/mahsum/bin:/Users/mahsum/.volta/bin:/Users/mahsum/.asdf/shims:/Users/mahsum/Library/Application Support/fnm/aliases/default/bin:/Users/mahsum/.fnm/aliases/default/bin:/Users/mahsum/Library/pnpm:/Users/mahsum/.local/share/pnpm:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>OPENCLAW_GATEWAY_PORT</key>
+    <string>28643</string>
+    <key>OPENCLAW_GATEWAY_TOKEN</key>
+    <string>51513c79aca1f33c4c1df22771dec1c4a68b03589de039ee14e808e678cfa933</string>
+    <key>OPENCLAW_LAUNCHD_LABEL</key>
+    <string>ai.openclaw.gateway</string>
+    <key>OPENCLAW_SYSTEMD_UNIT</key>
+    <string>openclaw-gateway.service</string>
+    <key>OPENCLAW_SERVICE_MARKER</key>
+    <string>openclaw</string>
+    <key>OPENCLAW_SERVICE_KIND</key>
+    <string>gateway</string>
+    <key>OPENCLAW_SERVICE_VERSION</key>
+    <string>2026.2.26</string>
+    </dict>
+  </dict>
+</plist>

@@ -1,0 +1,122 @@
+{
+  "ragThreshold": 0.45,
+  "ragTopK": 8,
+  "confidenceThreshold": 0.5,
+  "captureHeuristicThreshold": 0.4,
+  "enrichedFormation": true,
+  "foresightEnabled": true,
+  "biTemporalEnabled": true,
+  "relationalGraph": true,
+  "intentRouting": true,
+  "sessionReflection": true,
+  "strategicForgetting": true,
+  "memoryAsAction": true,
+  "llmContradiction": true,
+  "contradictionAutoSupersede": true,
+  "outcomeTracking": true,
+  "rehearsalEnabled": true,
+  "memoryLLMProvider": "gpt4omini",
+  "retrievalEvaluation": true,
+  "deepAbstraction": true,
+  "pinEnabled": true,
+  "truthAnchorProtection": true,
+  "confidenceDecayRate": 0.02,
+  "hierarchyEnabled": true,
+  "emotionalMemoryEnabled": true,
+  "flashbulbArousalThreshold": 0.8,
+  "preRetrievalGateEnabled": true,
+  "dynamicInjection": true,
+  "injectionFloor": 0.35,
+  "embeddingCacheTTL": 1800,
+  "embeddingCacheSize": 200,
+  "stabilityBoost": 0.15,
+  "contextBoostPerTag": 0.1,
+  "hotMemoryMaxCount": 15,
+  "maxLLMCallsPerDream": 10,
+  "federationEnabled": true,
+  "autoPublishCategories": ["preference", "fact", "decision"],
+  "federationWriteThrottlePerMinute": 5,
+  "federationQuarantineHours": 24,
+  "federationEscalationOnly": true,
+  "federationMinPublishConfidence": 0.5,
+  "federationSearchScorePenalty": 0.9,
+  "guardrailsEnabled": true,
+  "guardrailsPiiDetection": true,
+  "guardrailsInjectionDetection": true,
+  "guardrailsReadFiltering": true,
+  "auditTrailEnabled": true,
+  "auditIncludeReads": false,
+  "sensitiveCategories": ["secret", "credential", "api_key"],
+  "writeAuthorizationEnabled": true,
+  "selfAssessmentEnabled": false,
+  "selfAssessmentConfidenceFloor": 0.4,
+  "defaultAgentId": "hachiko",
+  "agentCapabilities": {
+    "hachiko": {
+      "canRead": ["*"],
+      "canWrite": ["preference","fact","correction","decision","entity","other"],
+      "trustScore": 0.95,
+      "domain": "personal"
+    },
+    "soros": {
+      "canRead": ["fact","decision","entity"],
+      "canWrite": ["fact","decision"],
+      "trustScore": 0.85,
+      "domain": "finance"
+    },
+    "cikcik": {
+      "canRead": ["preference","entity","fact"],
+      "canWrite": ["preference","entity"],
+      "trustScore": 0.7,
+      "domain": "social"
+    },
+    "tithonos": {
+      "canRead": ["fact","entity","decision","correction"],
+      "canWrite": ["fact","entity","decision"],
+      "trustScore": 0.8,
+      "domain": "technical"
+    },
+    "samantha": {
+      "canRead": ["preference","entity","fact"],
+      "canWrite": ["preference"],
+      "trustScore": 0.75,
+      "domain": "personal"
+    },
+    "hachi-life": {
+      "canRead": ["fact","preference","entity"],
+      "canWrite": ["fact","preference"],
+      "trustScore": 0.7,
+      "domain": "personal"
+    },
+    "hachi-scout": {
+      "canRead": ["fact","entity","decision"],
+      "canWrite": ["fact","entity"],
+      "trustScore": 0.8,
+      "domain": "technical"
+    },
+    "hachi-memory": {
+      "canRead": ["*"],
+      "canWrite": ["fact","entity","correction","preference"],
+      "trustScore": 0.9,
+      "domain": "personal"
+    },
+    "hachi-mailer": {
+      "canRead": ["preference","entity"],
+      "canWrite": ["entity"],
+      "trustScore": 0.65,
+      "domain": "personal"
+    },
+    "hachi-opportunity": {
+      "canRead": ["fact","decision","entity"],
+      "canWrite": ["fact","decision"],
+      "trustScore": 0.75,
+      "domain": "finance"
+    },
+    "main": {
+      "canRead": ["*"],
+      "canWrite": ["preference","fact","decision","entity"],
+      "trustScore": 0.85,
+      "domain": "personal"
+    }
+  }
+}

@@ -1,0 +1,1564 @@
+{
+  "version": "3",
+  "base_version": "v2026.3.1",
+  "last_updated": "2026-03-03",
+  "categories": {
+    "security": {
+      "description": "Security patches — never remove on upgrade",
+      "auto_retire": false,
+      "priority": 1
+    },
+    "gateway": {
+      "description": "Gateway/daemon platform-critical fixes",
+      "auto_retire": true,
+      "priority": 2
+    },
+    "session": {
+      "description": "Session/compaction data integrity",
+      "auto_retire": true,
+      "priority": 3
+    },
+    "channel": {
+      "description": "Channel-specific (Discord, Telegram, etc.)",
+      "auto_retire": true,
+      "priority": 4
+    },
+    "memory": {
+      "description": "Memory search and recall",
+      "auto_retire": true,
+      "priority": 5
+    },
+    "config": {
+      "description": "Configuration and environment",
+      "auto_retire": true,
+      "priority": 6
+    },
+    "stability": {
+      "description": "General bug/stability fixes",
+      "auto_retire": true,
+      "priority": 7
+    },
+    "platform": {
+      "description": "Platform-specific (macOS, self-hosted)",
+      "auto_retire": false,
+      "priority": 8
+    }
+  },
+  "patches": [
+    {
+      "pr": 19675,
+      "title": "fix(security): zero-width Unicode boundary marker bypass",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 23008,
+      "title": "fix(security): prototype pollution in mergeConfigSection",
+      "category": "security",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19191,
+      "title": "fix(security): harden cron file permissions to 0o600",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25966,
+      "title": "security(gateway): cap pending pre-auth websocket handshakes",
+      "category": "security",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25973,
+      "title": "security(gateway): reject oversized pre-auth websocket frames",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26544,
+      "title": "fix(security): enforce group chat agent allowlist in routing",
+      "category": "security",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25987,
+      "title": "security: remove agents dir from media serve allowlist",
+      "category": "security",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26337,
+      "title": "security: detect secrets in inbound messages",
+      "category": "security",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26675,
+      "title": "security: neutralize spoofed system messages in user input",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    },
+    {
+      "pr": 26533,
+      "title": "fix(security): add brute-force protection to pairing code validation",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26555,
+      "title": "fix(security): ignore Discord embed preview text in agent input",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27474,
+      "title": "fix: mask API key snippets in /models and /model status output",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16990,
+      "title": "fix(media): strip auth headers on cross-origin redirect",
+      "category": "security",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16992,
+      "title": "fix(gateway): escape XML in filename prevent prompt injection",
+      "category": "security",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24695,
+      "title": "fix(process): pid kill after group kill",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 15603,
+      "title": "fix(gateway): correct malformed HTTP 429 on WebSocket upgrade",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19134,
+      "title": "fix(gateway): specify utf-8 encoding on SSE res.write()",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16015,
+      "title": "fix(gateway): truncate oversized message in chat.history",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24763,
+      "title": "fix(gateway): include pairing requestId in close reason and recovery hints",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25299,
+      "title": "fix(daemon): use launchctl kill instead of bootout in gateway stop",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25276,
+      "title": "fix(exec): finalize child runs on exit not delayed stdio close",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26626,
+      "title": "fix(daemon): replace unconditional KeepAlive with SuccessfulExit dict",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26441,
+      "title": "fix(gateway): graceful drain mode for restart/shutdown",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25093,
+      "title": "fix(gateway): hard-bind OpenAI/OpenResponses ingress as external non-owner",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    },
+    {
+      "pr": 26875,
+      "title": "fix(gateway): undici TLS crash-loop on certificate rejection",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27013,
+      "title": "fix(daemon): kill stale PID before port-conflict restart",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26700,
+      "title": "fix(gateway): strip leaked EXTERNAL_UNTRUSTED_CONTENT wrappers",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 18446,
+      "title": "fix(gateway): /healthz endpoint return JSON instead of HTML",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26435,
+      "title": "fix(daemon): LaunchAgent post-update restart with version-aware plist",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22112,
+      "title": "fix(doctor): warn when gateway is network-exposed without TLS",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 21842,
+      "title": "fix(gateway-cli): use wss:// scheme when gatewayTls is enabled",
+      "category": "gateway",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27272,
+      "title": "fix(sessions): add bootId/pidStartTime to lock files to prevent PID recycling issues",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 28247,
+      "title": "bugfix: fix(gateway): fail fast on port-in-use to prevent systemd crash loop",
+      "category": "gateway",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 21201,
+      "title": "fix(compaction): repair tool_use/tool_result pairing",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 14328,
+      "title": "fix: strip incomplete tool_use blocks prevent 400 loops",
+      "category": "session",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25169,
+      "title": "fix: drop toolResult with empty/blank call_id prevent session corruption",
+      "category": "session",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    },
+    {
+      "pr": 24759,
+      "title": "fix(openai): drop orphan tool results after tool-call filtering",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25351,
+      "title": "fix(heartbeat): preserve transcript when heartbeat run made tool calls",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27142,
+      "title": "fix: drop thinking blocks for Anthropic to prevent session corruption",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 15050,
+      "title": "fix: transcript corruption resilience (run.ts only — repair.ts covered by #14328)",
+      "category": "session",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24538,
+      "title": "fix(discord): replyToMode first/off delivery",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24500,
+      "title": "fix(telegram): streaming preview on error payload",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22900,
+      "title": "fix(discord): set IS_COMPONENTS_V2 flag for v2 components",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22025,
+      "title": "fix(telegram): accept colon provider ids in mdl_list callbacks",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 23184,
+      "title": "fix(auto-reply): prevent reminder guard note leaking into channel messages",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24737,
+      "title": "fix(telegram): record sent messages for reaction own mode filtering",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27092,
+      "title": "fix(telegram): prevent 401 typing crash from killing bot process",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27207,
+      "title": "fix(typing): add onCleanup to finally blocks preventing indicator leak",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27319,
+      "title": "fix(discord): filter bot-own MESSAGE_CREATE events before debouncer",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16812,
+      "title": "fix: sessions_send failing on Telegram, Discord, Signal, and Slack",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27454,
+      "title": "fix(telegram): prevent crash loop on oversized file attachments",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    },
+    {
+      "pr": 16995,
+      "title": "fix(telegram): record update ID before processing to prevent crash replay",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27472,
+      "title": "fix(telegram): ensure polling initialization is abortable and retries",
+      "category": "channel",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27175,
+      "title": "fix(memory): prevent stuck typing on embedding model switch",
+      "category": "channel",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25280,
+      "title": "fix: sessions_send silent drop when A2A run fails",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24727,
+      "title": "fix(memory): qmd busy_timeout contention",
+      "category": "memory",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 12760,
+      "title": "fix(memory-flush): fire on every compaction cycle",
+      "category": "memory",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 14005,
+      "title": "fix(memory): bm25RankToScore constant 1.0 for negative ranks",
+      "category": "memory",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25409,
+      "title": "fix(memory): cap hybrid minScore at textWeight preserve BM25-only matches",
+      "category": "memory",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19129,
+      "title": "fix(config): block destructive config writes",
+      "category": "config",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16987,
+      "title": "fix(config): skipCache sessionStore prevent lost updates",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 18193,
+      "title": "fix: default elevatedDefault to 'off' instead of 'on'",
+      "category": "config",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24379,
+      "title": "fix(config): preserve env var refs during gateway startup config writes",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24805,
+      "title": "fix(usage): include archived deleted transcripts in usage-cost totals",
+      "category": "config",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": "24840a",
+      "title": "fix(config): redact env.vars with register(sensitive)",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": "24840c",
+      "title": "fix(cli): rename --url to --cookie-url in cookies set",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22929,
+      "title": "fix: NODE_EXTRA_CA_CERTS missing from LaunchAgent on macOS",
+      "category": "config",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24008,
+      "title": "fix(config): strip unknown keys instead of dropping entire section",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27044,
+      "title": "fix(net): allow network config overrides for pinned dispatchers",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 28428,
+      "title": "fix(gateway): stop embedding token in daemon service env to prevent post-rotation drift",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24614,
+      "title": "fix: models.list allowlist respect",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24039,
+      "title": "fix(logging): local time in console timestamps",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24732,
+      "title": "fix(acp): flush delta text on final chat event",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22475,
+      "title": "fix(logging): correct levelToMinLevel mapping to match tslog",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19177,
+      "title": "fix: use parseAgentSessionKey instead of fragile split",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 21615,
+      "title": "fix(tui): preserve main session model during heartbeat override",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 12191,
+      "title": "fix: guard undefined model.input in display and scan",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 22424,
+      "title": "fix: prevent crash when onUpdate is truthy but not callable",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19996,
+      "title": "fix(plugins): bind logger methods to preserve this context",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 24764,
+      "title": "fix(failover): classify subscription/plan unavailability as billing",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 20990,
+      "title": "fix: handle single-element type arrays in tryFlattenLiteralAnyOf",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16963,
+      "title": "fix: enable auth rate limiting by default",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19406,
+      "title": "fix(heartbeat): filter error payloads from heartbeat reply selection",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 14023,
+      "title": "fix: filter skills watcher to relevant file types prevent FD exhaustion",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 17950,
+      "title": "fix: filter error payloads from user-facing messages",
+      "category": "stability",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 16894,
+      "title": "fix: truncation splitting surrogate pairs in subagents/web-fetch",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25134,
+      "title": "fix: prevent echo loop by coercing isFromMe strings",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25092,
+      "title": "fix(hooks): enforce allowedAgentIds for omitted agentId",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25219,
+      "title": "fix(agent): prevent gateway hang on streaming fetch errors",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26565,
+      "title": "fix(cron): normalize jobId to id in store loader to prevent stuck jobs",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25818,
+      "title": "fix: log rotation for /tmp/openclaw gateway logs",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 10197,
+      "title": "fix: add missing allowAgents to agent defaults subagents schema",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 19407,
+      "title": "fix(agents): strip thinking blocks on cross-provider model switch",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 18230,
+      "title": "fix(sessions): repair lone surrogates in session history",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 23525,
+      "title": "fix: include sessionKey in session_start/session_end hook context",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 25702,
+      "title": "fix(archive): reject symlink tar extraction roots",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27477,
+      "title": "fix: normalize edit aliases and stabilize mutation fingerprint",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27388,
+      "title": "fix(agent): retry on Anthropic stream event order errors",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 23672,
+      "title": "fix(resilience): guard JSON.parse of external process output with try-catch",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 20185,
+      "title": "fix(model): recognize default/reset/clear keywords to clear session model override",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 26602,
+      "title": "fix: clean orphaned session lock files on in-process restart",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 23777,
+      "title": "fix(delivery): move permanently failed entries out of retry queue",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    },
+    {
+      "pr": 28514,
+      "title": "fix(agents): enforce Mistral strict9 tool call ID sanitization via OpenAI compat",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 28572,
+      "title": "fix(memory): allow FTS-only indexing without embedding provider",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 17823,
+      "title": "fix: memory leak in cron isolated runs — agent-events Maps never cleaned",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "pr": 27635,
+      "title": "fix(compaction): make compaction timeout configurable for slow local models",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "kevinWangSheng",
+      "scan_score": 87
+    },
+    {
+      "pr": 31890,
+      "title": "fix(agents): prevent and recover from tool_use_id transcript corruption",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "Sid-Qin",
+      "scan_score": 86
+    },
+    {
+      "pr": 29533,
+      "title": "fix(agents): add SSE parse error resilience with auto-retry",
+      "category": "session",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "guoqunabc",
+      "scan_score": 84
+    },
+    {
+      "pr": 29937,
+      "title": "fix: improve subagent result reliability (timeout aggregation, fallback lifecycle, thinking extraction)",
+      "category": "gateway",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "nszhsl",
+      "scan_score": 84
+    },
+    {
+      "pr": 28736,
+      "title": "fix(acp): resolve fleet agent IDs to acpx-compatible names before dispatch",
+      "category": "acp",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "AytuncYildizli",
+      "scan_score": 84
+    },
+    {
+      "pr": 32267,
+      "title": "fix(memory): Don't fallback to builtin when QMD is explicitly configured",
+      "category": "memory",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "AppsAtMe",
+      "scan_score": 84
+    },
+    {
+      "pr": 31876,
+      "title": "fix: don't auto-promote reasoning_effort for openrouter/auto; add ThinkLevel \"auto\"",
+      "category": "config",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "fritzebner",
+      "scan_score": 84
+    },
+    {
+      "pr": 27563,
+      "title": "fix(sandbox): mount skills at dedicated /skills path for sandboxed agents",
+      "category": "session",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "carrotRakko",
+      "scan_score": 84
+    },
+    {
+      "pr": 26843,
+      "title": "Plugins: lazy-install bundled extension deps on enable + loader fallback",
+      "category": "plugin",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "joshjhall",
+      "scan_score": 84
+    },
+    {
+      "pr": 27119,
+      "title": "fix: pass bashElevated to runEmbeddedPiAgent in cron and agent command paths",
+      "category": "session",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "mcaxtr",
+      "scan_score": 84
+    },
+    {
+      "pr": 30999,
+      "title": "feat(typing): gateway-level TTL coordinator as backstop for stuck typing indicators",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "theotarr",
+      "scan_score": 83
+    },
+    {
+      "pr": 31918,
+      "title": "fix: improve prompt caching by stabilizing identity prefix",
+      "category": "agent",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "stakeswky",
+      "scan_score": 83
+    },
+    {
+      "pr": 32350,
+      "title": "Gateway: periodically recover pending outbound deliveries",
+      "category": "gateway",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "Lucenx9",
+      "scan_score": 83
+    },
+    {
+      "pr": 26282,
+      "title": "fix(telegram): reject oversized files before download to prevent crash loop",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "white-rm",
+      "scan_score": 84
+    },
+    {
+      "pr": 26290,
+      "title": "fix(net): increase pinned dispatcher timeout from 300ms to 2500ms",
+      "category": "security",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "frankekn",
+      "scan_score": 84
+    },
+    {
+      "pr": 27866,
+      "title": "Telegram: honor NO_PROXY and env proxy precedence",
+      "category": "channel",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "bmendonca3",
+      "scan_score": 84
+    },
+    {
+      "pr": 30853,
+      "title": "hooks: unify internal + plugin hook registries to fix 5 systemic bugs",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "widingmarcus-cyber",
+      "scan_score": 79
+    },
+    {
+      "pr": 31791,
+      "title": "fix(sessions): guarantee lock release when teardown throws",
+      "category": "session",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "Sid-Qin",
+      "scan_score": 79
+    },
+    {
+      "pr": 31909,
+      "title": "fix(agents): ensure parallel tool results have correct parentId",
+      "category": "session",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "jduartedj",
+      "scan_score": 79
+    },
+    {
+      "pr": 32265,
+      "title": "fix(agents): prevent subagent timeout from leaking tool results to chat",
+      "category": "agent",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "guoqunabc",
+      "scan_score": 79
+    },
+    {
+      "pr": 31031,
+      "title": "fix(memory): change default QMD searchMode from 'search' to 'query'",
+      "category": "memory",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "taw0002",
+      "scan_score": 78
+    },
+    {
+      "pr": 31037,
+      "title": "fix: reduce chat token usage by excluding MEMORY.md from bootstrap context",
+      "category": "memory",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "stakeswky",
+      "scan_score": 78
+    },
+    {
+      "pr": 31042,
+      "title": "fix(tui): prevent /compact from crashing terminal session",
+      "category": "session",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "theotarr",
+      "scan_score": 78
+    },
+    {
+      "pr": 31056,
+      "title": "fix: auto auth profile override should not bias profile ordering",
+      "category": "security",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "taw0002",
+      "scan_score": 78
+    },
+    {
+      "pr": 31991,
+      "title": "fix(telegram): use HTML-aware chunker for delivery queue outbound",
+      "category": "channel",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.1"
+      ],
+      "added_date": "2026-03-03",
+      "last_test_date": "2026-03-03",
+      "author": "scoootscooob",
+      "scan_score": 78
+    }
+  ],
+  "fixes": [
+    {
+      "id": "FIX-A2",
+      "title": "fix(discord): catch ResilientGatewayPlugin maxAttempts=0 uncaught exception",
+      "category": "platform",
+      "risk": "critical",
+      "status": "active",
+      "script": "manual-patches/FIX-A2-discord-reconnect-crash.sh",
+      "notes": "Layer 1 upstream merged. Layer 2 (Carbon dist) still needed. Adapt for v2026.3.2.",
+      "tested_versions": [
+        "v2026.2.26"
+      ]
+    },
+    {
+      "id": "FIX-B1",
+      "title": "fix(ollama): add think:false + thinking field accumulator",
+      "category": "platform",
+      "risk": "high",
+      "status": "active",
+      "script": "manual-patches/FIX-B1-ollama-thinking-field.sh",
+      "notes": "Hardcoded dist filename — needs dynamic lookup for new versions.",
+      "tested_versions": [
+        "v2026.3.1"
+      ]
+    }
+  ],
+  "retired": [
+    {
+      "pr": 25416,
+      "retired_date": "2026-03-02",
+      "reason": "merged in v2026.3.1"
+    },
+    {
+      "pr": 21896,
+      "retired_date": "2026-03-02",
+      "reason": "merged in v2026.3.1"
+    },
+    {
+      "pr": 19077,
+      "retired_date": "2026-03-02",
+      "reason": "merged in v2026.3.1"
+    },
+    {
+      "pr": 17375,
+      "retired_date": "2026-03-02",
+      "reason": "superseded by v2026.3.1"
+    },
+    {
+      "pr": 25974,
+      "retired_date": "2026-03-02",
+      "reason": "superseded by v2026.3.1 clearResumeState"
+    },
+    {
+      "pr": 22711,
+      "retired_date": "2026-03-02",
+      "reason": "target removed in v2026.3.1"
+    },
+    {
+      "pr": 28291,
+      "retired_date": "2026-03-02",
+      "reason": "partially upstream in v2026.3.1"
+    },
+    {
+      "pr": 23557,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (safeAppend)"
+    },
+    {
+      "pr": 25381,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (dropThinkingBlocks)"
+    },
+    {
+      "pr": 22901,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (reserveTokens guard)"
+    },
+    {
+      "pr": 26673,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (resolveContextWindowInfo)"
+    },
+    {
+      "pr": 28555,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (double-compaction prevention)"
+    },
+    {
+      "pr": 11986,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (empty content drop)"
+    },
+    {
+      "pr": 16095,
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (repairToolUseResultPairing)"
+    },
+    {
+      "id": "FIX-A1",
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (probeGateway tlsFingerprint)"
+    },
+    {
+      "id": "FIX-A3",
+      "retired_date": "2026-03-03",
+      "reason": "merged in v2026.3.1 dist (else-if rejectUnauthorized fallback)"
+    }
+  ],
+  "disabled": [
+    {
+      "pr": 28258,
+      "reason": "wrapAsyncIterableWithRecovery strips response.result() -> crash-loop",
+      "blocked_by": "Needs fix: proxy .result() from original stream"
+    }
+  ]
+}

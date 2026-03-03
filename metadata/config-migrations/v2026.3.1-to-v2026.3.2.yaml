@@ -1,0 +1,41 @@
+# Config migration: v2026.3.1 -> v2026.3.2
+# Applied by: lib/config-migrate.sh during upgrade
+# Last updated: 2026-03-03
+
+source_version: "v2026.3.1"
+target_version: "v2026.3.2"
+
+openclaw_json:
+  renames: []
+
+  new_defaults:
+    - path: "acp.dispatch.enabled"
+      value: true
+      condition: "field_missing"
+      note: "ACP dispatch now default ENABLED in v2026.3.2. Set explicitly to control behavior."
+
+  deprecated: []
+
+  validations:
+    - check: "run 'openclaw config validate --json' after upgrade"
+      note: "New CLI command in v2026.3.2 (#31220)"
+
+launchagent:
+  changes:
+    - field: "Umask"
+      value: 63
+      note: "077 octal = 63 decimal. Added by #31919/#32022 for file permission hardening."
+    - field: "OPENCLAW_SERVICE_VERSION"
+      value: "2026.3.2"
+      note: "Update version marker"
+
+extension_configs:
+  memory-lancedb:
+    file: "~/.openclaw/extensions/memory-lancedb/extension-config.json"
+    changes: []
+    notes: "No config changes needed. embedding.dimensions forwarding (#32036) uses separate OpenAI client."
+
+security_notes:
+  - "#28670: ws:// now loopback-only. Our setup uses wss:// — not affected."
+  - "#32254: ACP sandbox inheritance fail-closed. Monitor for unexpected permission denials."
+  - "#29580: SecretRef expanded to 64 targets. Consider migrating plaintext API keys to $SECRET format."

@@ -1,0 +1,7 @@
+# FIX-A1 Pattern Definition — RETIRED
+id: "FIX-A1"
+title: "fix(gateway-status): pass tlsFingerprint to probeGateway for self-signed cert"
+status: retired
+retired_date: "2026-03-03"
+retired_reason: "Upstream merged in v2026.3.1 dist. probeGateway already accepts tlsFingerprint parameter."
+script: "manual-patches/FIX-A1-probe-tls-fingerprint.sh"

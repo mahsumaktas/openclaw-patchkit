@@ -1,0 +1,216 @@
+=====================================================
+ OpenClaw Patchkit — v2026.3.2 Patch Test Results
+ Date: 2026-03-03
+ Sandbox: v2026.3.2 (tag: v2026.3.2, SHA: 85377a2)
+ Method: 6-strategy engine (S0:manual, S1:clean, S2:exclude-test, S3:exclude-cl+test, S4:fuzz-C1, S5:3way)
+ Total PRs tested: 124 (122 diff + 2 synthetic)
+=====================================================
+
+=== SUMMARY ===
+PASS   : 98 (including 2 PARTIAL)
+  manual      : 39  (S0 — manual script, includes 2 PARTIAL)
+  clean       : 40  (S1 — git apply --check)
+  exclude-test: 13  (S2 — exclude *.test.* *.e2e.*)
+  exclude-cl+test: 1 (S3 — exclude CHANGELOG + tests)
+  fuzz-C1     : 5   (S4 — -C1 fuzz + exclude docs)
+  3way        : 0   (S5)
+PARTIAL: 2   (manual pass with SKIP/WARN — may need rewrite: 16987, 19191)
+FAILED : 26  (all strategies exhausted)
+  context-mismatch : 22  (diff context lines don't match v2026.3.2)
+  no-diff + manual-fail: 2  (24008, 26675 — diff not downloadable, manual script also fails)
+  manual-fail + diff-fail: 5  (23184, 23525, 24764, 26441, 27454 — both manual and diff fail)
+
+=== DETAILED RESULTS ===
+# Format: PR_NUM|STRATEGY|NOTES
+
+# --- SECURITY PATCHES (14) ---
+19675|manual|19675-zero-width-unicode.sh
+23008|clean|
+19191|manual|19191-cron-permissions.sh; WARN:store.ts pattern not found (partial)
+25966|fuzz-C1|
+26533|manual|26533-brute-force-pairing-code.sh
+25973|manual|25973-preauth-frame-limit.sh
+24840a|manual|24840a-env-redact.sh (synthetic)
+24840c|manual|24840c-cli-cookie-url.sh (synthetic)
+26675|FAILED|MANUAL_SCRIPT_FAIL:exit1 (system event format marker not found); NO_DIFF_AVAILABLE
+26337|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/get-reply-run.ts:258; NEW_FILES:src/security/detect-inbound-secrets.ts
+27474|manual|27474-mask-api-key-stars.sh
+25280|clean|
+25818|manual|25818-log-rotation.sh
+26290|FAILED|CONTEXT_MISMATCH:src/infra/net/fetch-guard.ts:138,src/infra/net/ssrf.ts:329,src/telegram/fetch.ts:3
+
+# --- STABILITY PATCHES (18) ---
+15050|manual|15050-transcript-corruption-resilience.sh
+16015|manual|16015-truncate-chat-history.sh
+16894|manual|16894-surrogate-truncation.sh
+16995|manual|16995-telegram-update-id-crash-replay.sh
+17823|manual|17823-cron-memory-leak.sh
+18230|manual|18230-repair-lone-surrogates.sh
+19134|manual|19134-sse-utf8.sh
+19407|manual|19407-strip-thinking-cross-provider.sh
+19996|manual|19996-bind-logger-methods.sh
+23672|manual|23672-json-parse-guard.sh
+14328|FAILED|CONTEXT_MISMATCH:src/agents/session-transcript-repair.ts:21
+25169|FAILED|CONTEXT_MISMATCH:src/agents/session-tool-result-guard.ts:146
+27635|FAILED|CONTEXT_MISMATCH:package.json:172,pnpm-lock.yaml:116,src/agents/usage.ts:58,src/config/schema.help.ts:920,src/config/schema.labels.ts:408
+28514|FAILED|CONTEXT_MISMATCH:src/agents/transcript-policy.ts:115
+31909|FAILED|CONTEXT_MISMATCH:src/agents/session-tool-result-guard.ts:106
+25702|FAILED|CONTEXT_MISMATCH:src/infra/archive.ts:496
+28572|manual|28572-fts-only-indexing.sh
+27388|manual|27388-stream-event-order-retry.sh
+
+# --- GATEWAY & CONFIG PATCHES (15) ---
+10197|manual|10197-allowagents-schema.sh
+16963|manual|16963-auth-ratelimit-default.sh
+16987|manual|16987-skipcache-session-store.sh; WARN:SKIP context not found or already applied (partial)
+19177|manual|19177-parse-agent-session-key.sh
+24008|FAILED|MANUAL_SCRIPT_FAIL:exit1 (validateConfigObjectRaw function body not found); NO_DIFF_AVAILABLE
+24379|manual|24379-env-var-preserve-config-writes.sh
+26435|manual|26435-launchagent-post-update.sh
+26626|manual|26626-keepalive-successfulexit.sh
+26441|FAILED|MANUAL_SCRIPT_FAIL:exit1 (subagent-registry ANNOUNCE_EXPIRY_MS not found); CONTEXT_MISMATCH:extensions/googlechat/src/channel.ts:554,src/agents/subagent-registry.ts:65,src/cli/gateway-cli/run-loop.ts:110
+30853|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/dispatch-from-config.ts:2,src/gateway/server-methods/sessions.ts:1,src/hooks/internal-hooks.ts:110; NEW_FILES:src/hooks/dispatch-unified.ts
+30999|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/typing.ts:1; NEW_FILES:src/gateway/typing-ttl-coordinator.ts
+27013|FAILED|CONTEXT_MISMATCH:src/cli/daemon-cli/restart-health.ts:175
+31042|FAILED|CONTEXT_MISMATCH:src/tui/tui.ts:770
+31991|FAILED|CONTEXT_MISMATCH:src/plugins/runtime/index.ts:124,src/plugins/runtime/types.ts:131
+26843|FAILED|CONTEXT_MISMATCH:src/cli/plugins-cli.ts:6; NEW_FILES:src/plugins/ensure-extension-deps.ts
+
+# --- TELEGRAM PATCHES (14) ---
+24737|manual|24737-telegram-reaction-filter.sh
+27092|manual|27092-telegram-401-typing.sh
+27472|manual|27472-telegram-polling-abortable.sh
+27454|FAILED|MANUAL_SCRIPT_FAIL:exit1 (fetchRemoteMedia import not found); CONTEXT_MISMATCH:src/telegram/bot/delivery.ts:417
+16812|FAILED|CONTEXT_MISMATCH:extensions/slack/src/channel.ts:55
+26282|FAILED|CONTEXT_MISMATCH:src/telegram/bot/delivery.ts:7
+27866|FAILED|CONTEXT_MISMATCH:src/telegram/proxy.ts:13 (partial:src/telegram/audit.ts applied cleanly)
+
+# --- DISCORD PATCHES (4) ---
+22900|manual|22900-discord-v2-flag.sh
+26555|manual|26555-discord-embed-preview-ignore.sh
+22112|manual|22112-doctor-network-tls.sh
+18446|manual|18446-healthz-json.sh
+
+# --- AGENT / SESSION PATCHES (17) ---
+20185|manual|20185-model-reset-keywords.sh
+23184|FAILED|MANUAL_SCRIPT_FAIL:exit1 (agent-runner.ts code block not found); CONTEXT_MISMATCH:src/auto-reply/reply/agent-runner.ts:84,src/auto-reply/types.ts:66
+23525|FAILED|MANUAL_SCRIPT_FAIL:exit1 (agentId pattern not found); CONTEXT_MISMATCH:src/auto-reply/reply/session.ts:449,src/plugins/types.ts:536
+24764|FAILED|MANUAL_SCRIPT_FAIL:exit1 (billing patterns block not found); CONTEXT_MISMATCH:src/agents/pi-embedded-helpers/errors.ts:652
+23777|manual|23777-delivery-max-retries.sh
+25219|manual|25219-streaming-fetch-hang.sh
+27044|manual|27044-net-config-overrides-pinned-dispatchers.sh
+28428|manual|28428-token-drift.sh
+25093|FAILED|CONTEXT_MISMATCH:src/commands/agent.ts:160,src/commands/agent/types.ts:73,src/gateway/openai-http.ts:54,src/gateway/openresponses-http.ts:255
+27477|FAILED|CONTEXT_MISMATCH:src/agents/pi-tools.read.ts:427
+
+# --- CLEAN APPLY (diff-only, no manual script) ---
+12191|clean|
+12760|exclude-test|
+14005|exclude-test|
+14023|clean|
+15603|clean|
+16990|exclude-test|
+16992|exclude-test|
+17950|exclude-test|
+18193|exclude-cl+test|
+19129|clean|
+19406|clean|
+20990|exclude-test|
+21201|clean|
+21615|clean|
+21842|clean|
+22025|clean|
+22475|clean|
+24039|clean|
+24500|clean|
+24614|clean|
+24695|clean|
+24727|clean|
+24732|clean|
+24759|exclude-test|
+24763|exclude-test|
+24805|clean|
+25092|exclude-test|
+25134|clean|
+25276|clean|
+25299|exclude-test|
+25351|clean|
+25409|clean|
+25987|clean|
+26544|clean|
+26602|clean|
+26700|fuzz-C1|
+26875|fuzz-C1|
+27119|clean|
+27142|fuzz-C1|
+27175|exclude-test|
+27319|clean|
+27563|clean|
+28247|exclude-test|
+28736|clean|
+29533|clean|
+29937|clean|
+31031|clean|
+31037|clean|
+31056|clean|
+31791|clean|
+31876|fuzz-C1|
+31890|exclude-test|
+31918|clean|
+32265|clean|
+32267|clean|
+32350|clean|
+
+=== FAILED PATCH DETAIL (28 total) ===
+
+# Truly FAILED — need manual rewrite for v2026.3.2:
+14328|FAILED|CONTEXT_MISMATCH:src/agents/session-transcript-repair.ts:21
+16812|FAILED|CONTEXT_MISMATCH:extensions/slack/src/channel.ts:55
+23184|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/agent-runner.ts:84,src/auto-reply/types.ts:66
+23525|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/session.ts:449,src/plugins/types.ts:536
+24008|FAILED|NO_DIFF_AVAILABLE + MANUAL_SCRIPT_FAIL (validateConfigObjectRaw not found)
+24764|FAILED|CONTEXT_MISMATCH:src/agents/pi-embedded-helpers/errors.ts:652
+25093|FAILED|CONTEXT_MISMATCH:src/commands/agent.ts:160,src/commands/agent/types.ts:73,src/gateway/openai-http.ts:54,src/gateway/openresponses-http.ts:255
+25169|FAILED|CONTEXT_MISMATCH:src/agents/session-tool-result-guard.ts:146
+25702|FAILED|CONTEXT_MISMATCH:src/infra/archive.ts:496
+26282|FAILED|CONTEXT_MISMATCH:src/telegram/bot/delivery.ts:7
+26290|FAILED|CONTEXT_MISMATCH:src/infra/net/fetch-guard.ts:138,src/infra/net/ssrf.ts:329,src/telegram/fetch.ts:3
+26337|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/get-reply-run.ts:258 + NEW_FILES:src/security/detect-inbound-secrets.ts
+26441|FAILED|CONTEXT_MISMATCH:src/agents/subagent-registry.ts:65,extensions/googlechat/src/channel.ts:554,src/cli/gateway-cli/run-loop.ts:110
+26675|FAILED|NO_DIFF_AVAILABLE + MANUAL_SCRIPT_FAIL (system event format marker not found)
+26843|FAILED|CONTEXT_MISMATCH:src/cli/plugins-cli.ts:6 + NEW_FILES:src/plugins/ensure-extension-deps.ts
+27013|FAILED|CONTEXT_MISMATCH:src/cli/daemon-cli/restart-health.ts:175
+27454|FAILED|CONTEXT_MISMATCH:src/telegram/bot/delivery.ts:417
+27477|FAILED|CONTEXT_MISMATCH:src/agents/pi-tools.read.ts:427
+27635|FAILED|CONTEXT_MISMATCH:package.json:172,pnpm-lock.yaml:116,src/agents/usage.ts:58,src/config/schema.help.ts:920
+27866|FAILED|CONTEXT_MISMATCH:src/telegram/proxy.ts:13
+28514|FAILED|CONTEXT_MISMATCH:src/agents/transcript-policy.ts:115
+30853|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/dispatch-from-config.ts:2,src/gateway/server-methods/sessions.ts:1 + NEW_FILES:src/hooks/dispatch-unified.ts
+30999|FAILED|CONTEXT_MISMATCH:src/auto-reply/reply/typing.ts:1 + NEW_FILES:src/gateway/typing-ttl-coordinator.ts
+31042|FAILED|CONTEXT_MISMATCH:src/tui/tui.ts:770
+31909|FAILED|CONTEXT_MISMATCH:src/agents/session-tool-result-guard.ts:106
+31991|FAILED|CONTEXT_MISMATCH:src/plugins/runtime/index.ts:124,src/plugins/runtime/types.ts:131
+
+# PARTIAL (manual pass with warnings):
+16987|manual|PARTIAL — SKIP:context not found or already applied
+19191|manual|PARTIAL — WARN:store.ts pattern not found
+
+=== HOT CONFLICT FILES (files causing most failures) ===
+src/agents/session-tool-result-guard.ts     — 2 PRs (25169, 31909)
+src/agents/pi-embedded-helpers/errors.ts    — 2 PRs (14328 dep, 24764)
+src/telegram/bot/delivery.ts                — 2 PRs (26282, 27454)
+src/auto-reply/reply/agent-runner.ts        — 1 PR  (23184)
+src/auto-reply/reply/session.ts             — 1 PR  (23525)
+src/auto-reply/reply/typing.ts              — 1 PR  (30999)
+src/auto-reply/reply/get-reply-run.ts       — 1 PR  (26337)
+src/auto-reply/reply/dispatch-from-config.ts — 1 PR (30853)
+src/plugins/types.ts                        — 1 PR  (23525)
+src/plugins/runtime/index.ts                — 1 PR  (31991)
+src/infra/net/fetch-guard.ts                — 1 PR  (26290)
+src/infra/archive.ts                        — 1 PR  (25702)
+src/tui/tui.ts                              — 1 PR  (31042)
+src/cli/daemon-cli/restart-health.ts        — 1 PR  (27013)
+src/cli/plugins-cli.ts                      — 1 PR  (26843)
+extensions/slack/src/channel.ts             — 1 PR  (16812)
+extensions/googlechat/src/channel.ts        — 1 PR  (26441)
+package.json / pnpm-lock.yaml              — 1 PR  (27635)

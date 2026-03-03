@@ -1,0 +1,95 @@
+# extensions.yaml — Extension compatibility manifest for upgrade guard
+# Used by: lib/extension-guard.sh, commands/upgrade.sh
+# Last updated: 2026-03-03
+
+disabled_builtins:
+  - name: memory-lancedb
+    reason: "Replaced by custom v9 extension at custom_path"
+    custom_path: "~/.openclaw/extensions/memory-lancedb"
+    disable_method: "sudo mv {src} {src}.disabled"
+    since_version: "v2026.3.1"
+  - name: acpx
+    reason: "Custom ACPX 0.1.15 at external path"
+    custom_path: "~/.openclaw/extensions/acpx"
+    disable_method: "sudo mv {src} {src}.disabled"
+    since_version: "v2026.3.1"
+
+extensions:
+  - name: memory-lancedb
+    path: "~/.openclaw/extensions/memory-lancedb"
+    entry_point: "index.ts"
+    config_files:
+      - "extension-config.json"
+    api_usage:
+      - "api.pluginConfig"
+      - "api.resolvePath()"
+      - "api.logger"
+      - "api.registerTool()"
+      - "api.registerCli()"
+      - "api.on('before_agent_start')"
+      - "api.on('agent_end')"
+      - "api.registerService()"
+    known_unsafe_casts:
+      - "(event as any).sessionId"
+    native_deps:
+      - "@lancedb/lancedb"
+      - "openai"
+    breaking_risk: low
+    notes: "Own OpenAI client for embeddings — isolated from core embedding changes. 5400+ lines."
+    upgrade_actions:
+      - "Verify built-in memory-lancedb.disabled after npm install"
+      - "Run: ltm search 'test' to verify extension loads"
+      - "Check gateway.log for 'memory-lancedb' initialization"
+
+  - name: acpx
+    path: "~/.openclaw/extensions/acpx"
+    entry_point: "index.ts"
+    config_files: []
+    api_usage:
+      - "api.pluginConfig"
+      - "api.registerService()"
+      - "registerAcpRuntimeBackend()"
+      - "unregisterAcpRuntimeBackend()"
+    native_deps:
+      - "acpx"
+    breaking_risk: low-medium
+    notes: "ACPX_PINNED_VERSION=0.1.13 in config.ts but package.json says ^0.1.15. ACP dispatch default ENABLED in v2026.3.2."
+    upgrade_actions:
+      - "Verify built-in acpx.disabled after npm install"
+      - "Check ACP dispatch behavior after upgrade"
+      - "Consider adding explicit acp.dispatch.enabled config"
+
+  - name: oracle-agents
+    path: "~/.openclaw/extensions/oracle-agents"
+    entry_point: "index.ts"
+    config_files:
+      - "extension-config.json"
+    api_usage:
+      - "api.pluginConfig"
+      - "api.registerTool()"
+      - "(api as any).config"
+    native_deps:
+      - "@anthropic-ai/sdk"
+      - "@sinclair/typebox"
+    breaking_risk: none
+    notes: "Uses own local OpenClawPluginApi type definition — fully isolated from plugin-sdk changes."
+    upgrade_actions: []
+
+  - name: attention-context
+    path: "~/.openclaw/extensions/attention-context"
+    entry_point: "index.ts"
+    config_files: []
+    api_usage:
+      - "api.registerTool()"
+      - "api.registerCli()"
+      - "emptyPluginConfigSchema"
+      - "ctx.sessionKey"
+    native_deps: []
+    breaking_risk: none
+    notes: "Lightweight extension, minimal API surface."
+    upgrade_actions: []
+
+  - name: cognitive-memory
+    path: "~/.openclaw/extensions/cognitive-memory.disabled"
+    status: disabled
+    notes: "Code migrated to memory-lancedb. Plugin DISABLED permanently."

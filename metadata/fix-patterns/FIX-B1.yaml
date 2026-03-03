@@ -1,0 +1,34 @@
+# FIX-B1 Pattern Definition
+id: "FIX-B1"
+title: "fix(ollama): add think:false + thinking field accumulator"
+status: active
+risk: high
+
+layers:
+  - name: "Ollama request body — think:false"
+    status: active
+    target_file_pattern: "dist/model-selection-*.js"
+    target_is_relative_to: "openclaw_root"
+    idempotency_marker: "think: false"
+    expected_patterns:
+      - pattern: "options: ollamaOptions"
+        required: true
+    patch_action: |
+      After 'options: ollamaOptions' line, within the Ollama request body object, add:
+      think: false
+
+  - name: "Stream accumulator — thinking field"
+    status: active
+    target_file_pattern: "dist/model-selection-*.js"
+    idempotency_marker: "message?.thinking"
+    expected_patterns:
+      - pattern: "message?.reasoning"
+        required: true
+    patch_action: |
+      After 'chunk.message?.reasoning' accumulator line, add:
+      else if (chunk.message?.thinking) accumulatedContent += chunk.message.thinking;
+
+tested_versions: ["v2026.3.1"]
+adapt_for: "v2026.3.2"
+adapt_notes: "Filename uses content hash (model-selection-BcQumkju.js in v2026.3.1). Hash WILL change. Use glob pattern to find file dynamically."
+dynamic_file_lookup: "ls $OPENCLAW_ROOT/dist/model-selection-*.js"

@@ -1,0 +1,7 @@
+# FIX-A3 Pattern Definition — RETIRED
+id: "FIX-A3"
+title: "fix(gateway): accept self-signed cert for wss:// without fingerprint"
+status: retired
+retired_date: "2026-03-03"
+retired_reason: "Upstream merged in v2026.3.1 dist. else-if rejectUnauthorized=false fallback already present."
+script: "manual-patches/FIX-A3-wss-selfsigned-fallback.sh"
