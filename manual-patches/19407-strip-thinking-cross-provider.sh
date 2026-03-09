@@ -107,38 +107,80 @@ with open(path, 'w') as f:
 PYEOF
 
 # 2) Add export to pi-embedded-helpers.ts
+# v2026.3.2: openai export block is now multi-line and includes
+# downgradeOpenAIFunctionCallReasoningPairs as well.  Match the actual source
+# shape rather than the old single-line form.
 python3 - "$HELPERS_FILE" << 'PYEOF'
-import sys
+import sys, re
 path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-old = 'export { downgradeOpenAIReasoningBlocks } from "./pi-embedded-helpers/openai.js";'
-new = '''export {
-  downgradeOpenAIReasoningBlocks,
-  stripNonNativeThinkingBlocks,
-} from "./pi-embedded-helpers/openai.js";'''
+# Already patched guard
+if 'stripNonNativeThinkingBlocks' in content:
+    print("    SKIP step-2: stripNonNativeThinkingBlocks already exported")
+    sys.exit(0)
 
-content = content.replace(old, new)
+# v2026.3.2 shape: multi-line export block with downgradeOpenAIFunctionCallReasoningPairs
+# We inject stripNonNativeThinkingBlocks as an additional export in that same block.
+# Pattern matches the closing of the openai.js re-export block regardless of how many
+# names are listed inside it.
+pattern = r'(export \{[^}]*\bdowngradeOpenAIReasoningBlocks\b[^}]*\} from "\./pi-embedded-helpers/openai\.js";)'
+
+def add_export(m):
+    block = m.group(1)
+    # Insert before the closing brace
+    return block.replace(
+        '} from "./pi-embedded-helpers/openai.js";',
+        '  stripNonNativeThinkingBlocks,\n} from "./pi-embedded-helpers/openai.js";'
+    )
+
+new_content, n = re.subn(pattern, add_export, content, flags=re.DOTALL)
+if n == 0:
+    print("ERROR: could not find openai.js re-export block in pi-embedded-helpers.ts", file=sys.stderr)
+    sys.exit(1)
 
 with open(path, 'w') as f:
-    f.write(content)
+    f.write(new_content)
 PYEOF
 
 # 3) Add import and integrate into google.ts sanitizeSessionHistory pipeline
+# v2026.3.2: import block now includes downgradeOpenAIFunctionCallReasoningPairs
+# before downgradeOpenAIReasoningBlocks, and the sanitizedOpenAI assignment wraps
+# both functions.  Return sites use !policy.applyGoogleTurnOrdering guard (no
+# applyGoogleTurnOrderingFix call in the early-return path in older code).
 python3 - "$GOOGLE_FILE" << 'PYEOF'
-import sys
+import sys, re
 path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# Add stripNonNativeThinkingBlocks to the import from pi-embedded-helpers.js
-old_import = '  downgradeOpenAIReasoningBlocks,\n  isCompactionFailureError,'
-new_import = '  downgradeOpenAIReasoningBlocks,\n  isCompactionFailureError,\n  stripNonNativeThinkingBlocks,'
-content = content.replace(old_import, new_import)
+# Already patched guard
+if 'stripNonNativeThinkingBlocks' in content:
+    print("    SKIP step-3: google.ts already patched")
+    sys.exit(0)
 
-# Add the thinking block stripping step after sanitizedOpenAI assignment
-# Find the line with sanitizedOpenAI assignment end
+# ── Step 3a: inject stripNonNativeThinkingBlocks into the import block ────────
+# Match the pi-embedded-helpers.js named-import block (multi-line).
+# We add stripNonNativeThinkingBlocks after the last existing import name.
+pattern_import = r'(import \{[^}]*\bdowngradeOpenAIReasoningBlocks\b[^}]*\} from "\.\./pi-embedded-helpers\.js";)'
+
+def patch_import(m):
+    block = m.group(1)
+    return block.replace(
+        '} from "../pi-embedded-helpers.js";',
+        '  stripNonNativeThinkingBlocks,\n} from "../pi-embedded-helpers.js";'
+    )
+
+content, n = re.subn(pattern_import, patch_import, content, flags=re.DOTALL)
+if n == 0:
+    print("ERROR: could not find pi-embedded-helpers.js import block in google.ts", file=sys.stderr)
+    sys.exit(1)
+
+# ── Step 3b: inject the cross-provider strip step after sanitizedOpenAI ───────
+# The sanitizedOpenAI assignment ends with `: sanitizedCompactionUsage;`
+# followed by a blank line and `if (hasSnapshot && (!priorSnapshot || modelChanged)) {`
+# This shape is stable across v2026.2.x and v2026.3.x.
 old_pipeline = '    : sanitizedCompactionUsage;\n\n  if (hasSnapshot && (!priorSnapshot || modelChanged)) {'
 new_pipeline = '''    : sanitizedCompactionUsage;
 
@@ -151,14 +193,25 @@ new_pipeline = '''    : sanitizedCompactionUsage;
     : sanitizedOpenAI;
 
   if (hasSnapshot && (!priorSnapshot || modelChanged)) {'''
-content = content.replace(old_pipeline, new_pipeline)
 
-# Replace sanitizedOpenAI references after the new variable with sanitizedThinkingCrossProvider
-# Find the return statements that use sanitizedOpenAI
-content = content.replace(
-    '    return sanitizedOpenAI;\n  }\n\n  return applyGoogleTurnOrderingFix({\n    messages: sanitizedOpenAI,',
-    '    return sanitizedThinkingCrossProvider;\n  }\n\n  return applyGoogleTurnOrderingFix({\n    messages: sanitizedThinkingCrossProvider,'
-)
+if old_pipeline not in content:
+    print("ERROR: could not find sanitizedOpenAI pipeline anchor in google.ts", file=sys.stderr)
+    sys.exit(1)
+
+content = content.replace(old_pipeline, new_pipeline, 1)
+
+# ── Step 3c: replace sanitizedOpenAI with sanitizedThinkingCrossProvider ──────
+# v2026.3.2 uses !policy.applyGoogleTurnOrdering guard for early return.
+# Match both the early-return and the applyGoogleTurnOrderingFix call sites.
+# We do a targeted replacement only AFTER the insertion point so we don't
+# accidentally rename the variable declaration itself.
+split_marker = 'const sanitizedThinkingCrossProvider = modelChanged'
+before, after = content.split(split_marker, 1)
+
+after = after.replace('return sanitizedOpenAI;', 'return sanitizedThinkingCrossProvider;')
+after = after.replace('messages: sanitizedOpenAI,', 'messages: sanitizedThinkingCrossProvider,')
+
+content = before + split_marker + after
 
 with open(path, 'w') as f:
     f.write(content)

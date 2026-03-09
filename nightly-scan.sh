@@ -133,17 +133,17 @@ query(\$cursor: String) {
 const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
 const nodes=d.data?.search?.nodes||[];
 for(const n of nodes) console.log(JSON.stringify(n));
-" >> "$WORK/recent-prs.jsonl" 2>/dev/null
+" >> "$WORK/recent-prs.jsonl" 2>/dev/null || true
 
   # Check pagination
   HAS_NEXT=$(echo "$RESPONSE" | node -e "
 const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
 console.log(d.data?.search?.pageInfo?.hasNextPage?'true':'false');
-" 2>/dev/null)
+" 2>/dev/null || echo "false")
   CURSOR=$(echo "$RESPONSE" | node -e "
 const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
 console.log(d.data?.search?.pageInfo?.endCursor||'');
-" 2>/dev/null)
+" 2>/dev/null || echo "")
 
   CURRENT_COUNT=$(wc -l < "$WORK/recent-prs.jsonl" | tr -d ' ')
   echo "  Page $PAGE: $CURRENT_COUNT PRs fetched so far"
@@ -155,7 +155,7 @@ const scanned=new Set($SCANNED_SET);
 const nodes=d.data?.search?.nodes||[];
 const newCount=nodes.filter(n=>!n.isDraft&&!scanned.has(n.number)).length;
 console.log(newCount);
-" 2>/dev/null)
+" 2>/dev/null || echo "0")
 
   if [ "${PAGE_NEW:-0}" -eq 0 ] && [ "$PAGE" -gt 1 ]; then
     echo "  No new unscanned PRs on page $PAGE — stopping early."
@@ -268,12 +268,13 @@ if (largeCount > 0) console.error('  Large PRs (>3000 lines, included): ' + larg
 
 fs.writeFileSync('$WORK/new-candidates.json', JSON.stringify(candidates, null, 2));
 console.log(candidates.length);
-" 2>/dev/null > "$WORK/new-count.txt"
+" 2>/dev/null > "$WORK/new-count.txt" || true
 
-NEW_COUNT=$(cat "$WORK/new-count.txt" | tr -d ' ')
+NEW_COUNT=$(cat "$WORK/new-count.txt" 2>/dev/null | tr -d ' ')
+NEW_COUNT="${NEW_COUNT:-0}"
 echo "  New candidates to score: $NEW_COUNT"
 
-if [ "$NEW_COUNT" -eq 0 ]; then
+if [ "$NEW_COUNT" -eq 0 ] 2>/dev/null; then
   echo "  No new PRs to score. Checking upstream merges..."
   # Skip to step 4
 else
@@ -281,17 +282,24 @@ else
   echo "[3/7] Scoring $NEW_COUNT new PRs with Sonnet 4.6..."
 
   cd "$TRELIQ_DIR"
-  set -a && source .env && set +a
+  set -a && source .env 2>/dev/null && set +a || true
 
   TRELIQ_MODEL="$MODEL" \
   TRELIQ_INPUT="$WORK/new-candidates.json" \
   TRELIQ_OUTPUT="$WORK/treliq-results.json" \
-  node --import tsx ./bulk-score-openclaw.ts 2>&1 | tail -5
+  node --import tsx ./bulk-score-openclaw.ts 2>&1 | tail -5 || true
+
+  # Verify treliq output exists before proceeding
+  if [ ! -f "$WORK/treliq-results.json" ]; then
+    echo "  WARNING: treliq-results.json not created — scoring may have failed"
+    echo '{"rankedPRs":[]}' > "$WORK/treliq-results.json"
+  fi
 
   # Update registry with new scores
   node -e "
   const fs = require('fs');
   const results = JSON.parse(fs.readFileSync('$WORK/treliq-results.json', 'utf8'));
+  if (!results.rankedPRs || results.rankedPRs.length === 0) { console.log('No scores to update'); process.exit(0); }
   const registry = JSON.parse(fs.readFileSync('$REGISTRY', 'utf8'));
 
   for (const pr of results.rankedPRs) {
@@ -325,7 +333,7 @@ else
   }
   console.log('');
   console.log('Registry updated: ' + results.rankedPRs.length + ' new scores');
-  " 2>/dev/null
+  " 2>/dev/null || true
 
   # ── Step 3.1: Discord notification with stability-first classification ────
   node -e "
@@ -352,7 +360,7 @@ else
 
   fs.writeFileSync('$WORK/discord-notable.txt', lines.join('\n'));
   console.log(notable.length);
-  " 2>/dev/null > "$WORK/notable-count.txt"
+  " 2>/dev/null > "$WORK/notable-count.txt" || true
 
   NOTABLE_COUNT=$(cat "$WORK/notable-count.txt" 2>/dev/null | tr -d ' ')
   if [ -n "$NOTABLE_COUNT" ] && [ "$NOTABLE_COUNT" -gt 0 ] 2>/dev/null; then
@@ -370,8 +378,9 @@ else
   AUTO_ADD_COUNT=0
   FEATURE_DEFERRED_COUNT=0
 
-  OPENCLAW_ROOT_RESOLVED="$(npm root -g)/openclaw"
-  OPENCLAW_TAG=$(node -e "console.log('v'+require('$OPENCLAW_ROOT_RESOLVED/package.json').version)" 2>/dev/null)
+  OPENCLAW_ROOT_RESOLVED="$(npm root -g 2>/dev/null || echo '/Users/mahsum/.npm-global/lib/node_modules')/openclaw"
+  OPENCLAW_TAG=$(node -e "console.log('v'+require('$OPENCLAW_ROOT_RESOLVED/package.json').version)" 2>/dev/null || true)
+  OPENCLAW_TAG="${OPENCLAW_TAG:-v2026.3.7}"
 
   node -e "
   const fs = require('fs');
@@ -404,7 +413,7 @@ else
   fs.writeFileSync('$WORK/auto-add-deferred.json', JSON.stringify(deferred, null, 2));
   // Output: eligible,deferred
   console.log(candidates.length + ',' + deferred.length);
-  " 2>/dev/null > "$WORK/auto-add-count.txt"
+  " 2>/dev/null > "$WORK/auto-add-count.txt" || true
 
   AUTO_COUNTS=$(cat "$WORK/auto-add-count.txt" 2>/dev/null | tr -d ' ')
   AUTO_CANDIDATE_COUNT=$(echo "$AUTO_COUNTS" | cut -d',' -f1)
@@ -416,7 +425,7 @@ else
     DEFERRED_MSG=$(node -e "
     const d=JSON.parse(require('fs').readFileSync('$WORK/auto-add-deferred.json','utf8'));
     console.log(d.map(p=>'#'+p.number+' ('+p.totalScore+') '+p.intent+': '+p.title).join('\n'));
-    " 2>/dev/null)
+    " 2>/dev/null || echo "(deferred list unavailable)")
     notify "Stability-First: $FEATURE_DEFERRED_COUNT Feature PR(s) Need Manual Review" "$DEFERRED_MSG\n\nThese scored >= 85 but are feature/refactor — not auto-added per stability-first policy." "yellow"
   fi
 
@@ -486,12 +495,13 @@ else
 
     fs.writeFileSync('$WORK/auto-add-passed.json', JSON.stringify(passed, null, 2));
     console.log(passed.length);
-    " 2>/dev/null > "$WORK/auto-add-passed-count.txt"
+    " 2>/dev/null > "$WORK/auto-add-passed-count.txt" || true
 
     PASSED_COUNT=$(cat "$WORK/auto-add-passed-count.txt" 2>/dev/null | tr -d ' ')
-    echo "  Passed apply-check: ${PASSED_COUNT:-0}"
+    PASSED_COUNT="${PASSED_COUNT:-0}"
+    echo "  Passed apply-check: $PASSED_COUNT"
 
-    if [ -n "$PASSED_COUNT" ] && [ "$PASSED_COUNT" -gt 0 ] 2>/dev/null; then
+    if [ "$PASSED_COUNT" -gt 0 ] 2>/dev/null; then
       # Add to conf
       DATE_STAMP=$(date '+%Y-%m-%d')
       AUTO_ADDED_LIST=$(node -e "
@@ -512,10 +522,10 @@ else
       conf = conf.trimEnd() + '\n' + newLines;
       fs.writeFileSync(confPath, conf);
       console.log(addedNums.join(','));
-      " 2>/dev/null)
+      " 2>/dev/null || true)
 
-      AUTO_ADDED="$AUTO_ADDED_LIST"
-      AUTO_ADD_COUNT=$PASSED_COUNT
+      AUTO_ADDED="${AUTO_ADDED_LIST:-}"
+      AUTO_ADD_COUNT="${PASSED_COUNT:-0}"
       echo "  Auto-added to conf: $AUTO_ADDED"
 
       # v2: No live build. PRs already passed sandbox apply-check above.
@@ -524,7 +534,7 @@ else
       const fs = require('fs');
       const passed = JSON.parse(fs.readFileSync('$WORK/auto-add-passed.json', 'utf8'));
       console.log(passed.map(p => '**#' + p.number + '** (' + p.score + ') [' + (p.strategy || 'clean') + '] ' + p.title).join('\n'));
-      " 2>/dev/null)
+      " 2>/dev/null || echo "(detail unavailable)")
       notify "Auto-Add: $AUTO_ADD_COUNT PR(s) Added to conf" \
         "Sandbox apply-check passed. Run \`upgrade-openclaw.sh\` to build.\n\n$ADDED_DETAIL" \
         "blue"
@@ -581,16 +591,16 @@ echo "[5/7] Updating patchkit repo..."
 if [ -d "$PATCHKIT_DIR/.git" ]; then
   cd "$PATCHKIT_DIR"
 
-  # Copy latest files
-  cp "$CONF" "$PATCHKIT_DIR/pr-patches.conf"
-  cp "$REGISTRY" "$PATCHKIT_DIR/scan-registry.json"
-  cp "$PATCHES_DIR/rebuild-with-patches.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/discover-patches.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/notify.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/health-monitor.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/post-update-check.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/nightly-scan.sh" "$PATCHKIT_DIR/"
-  cp "$PATCHES_DIR/install-sudoers.sh" "$PATCHKIT_DIR/"
+  # Copy latest files (|| true — cp exits 1 when src=dest via symlink)
+  cp "$CONF" "$PATCHKIT_DIR/pr-patches.conf" 2>/dev/null || true
+  cp "$REGISTRY" "$PATCHKIT_DIR/scan-registry.json" 2>/dev/null || true
+  cp "$PATCHES_DIR/rebuild-with-patches.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/discover-patches.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/notify.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/health-monitor.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/post-update-check.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/nightly-scan.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
+  cp "$PATCHES_DIR/install-sudoers.sh" "$PATCHKIT_DIR/" 2>/dev/null || true
   cp -r "$PATCHES_DIR/manual-patches" "$PATCHKIT_DIR/" 2>/dev/null || true
 
   # Update README stats
@@ -614,15 +624,15 @@ if [ -d "$PATCHKIT_DIR/.git" ]; then
 
   fs.writeFileSync('$PATCHKIT_DIR/README.md', readme);
   console.log('README updated');
-  " 2>/dev/null
+  " 2>/dev/null || true
 
   # Commit and push
   git add -A
-  CHANGES=$(git diff --cached --stat | tail -1)
+  CHANGES=$(git diff --cached --stat 2>/dev/null | tail -1 || true)
   if [ -n "$CHANGES" ]; then
     DATE=$(date '+%Y-%m-%d')
     NEW_MSG=""
-    if [ "$NEW_COUNT" -gt 0 ]; then
+    if [ "${NEW_COUNT:-0}" -gt 0 ] 2>/dev/null; then
       NEW_MSG=", $NEW_COUNT new PRs scored"
     fi
     MERGE_MSG=""
@@ -652,7 +662,7 @@ fi
 echo ""
 echo "[7/7] === NIGHTLY SCAN COMPLETE ==="
 echo "  Date: $(date '+%Y-%m-%d %H:%M')"
-echo "  Recent PRs checked: $TOTAL_RECENT"
+echo "  Recent PRs checked: ${TOTAL_RECENT:-0}"
 echo "  New PRs scored: ${NEW_COUNT:-0}"
 echo "  Auto-added (stability only): ${AUTO_ADD_COUNT:-0}"
 echo "  Feature PRs deferred (manual): ${FEATURE_DEFERRED_COUNT:-0}"
