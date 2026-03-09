@@ -4,27 +4,26 @@
 # to a new internal `systemNote` field on ReplyPayload, so it no longer leaks into
 # channel messages.
 #
-# Source changes (CHANGELOG and tests excluded):
-#   - src/auto-reply/reply/agent-runner.ts: remove trimmed+text append, use systemNote
+# v2026.3.7: appendUnscheduledReminderNote was extracted to
+# agent-runner-reminder-guard.ts (no longer inline in agent-runner.ts).
+#
+# Source changes:
+#   - src/auto-reply/reply/agent-runner-reminder-guard.ts: use systemNote instead of text
 #   - src/auto-reply/types.ts: add systemNote?: string to ReplyPayload
 set -euo pipefail
 cd "$1"
 
-RUNNER="src/auto-reply/reply/agent-runner.ts"
+GUARD="src/auto-reply/reply/agent-runner-reminder-guard.ts"
 TYPES="src/auto-reply/types.ts"
 
-# ─── Patch 1: agent-runner.ts ─────────────────────────────────────────────────
-# Replace the text-append logic with systemNote assignment.
-# Old: creates `trimmed` var, appends UNSCHEDULED_REMINDER_NOTE to `text`
-# New: sets `systemNote` field on the payload instead
-if grep -q 'systemNote: UNSCHEDULED_REMINDER_NOTE' "$RUNNER" 2>/dev/null; then
-  echo "SKIP: $RUNNER already patched (systemNote present)"
+# ─── Patch 1: agent-runner-reminder-guard.ts ──────────────────────────────────
+if grep -q 'systemNote: UNSCHEDULED_REMINDER_NOTE' "$GUARD" 2>/dev/null; then
+  echo "SKIP: $GUARD already patched (systemNote present)"
 else
-  # Use a heredoc-based python3 to avoid bash interpolation of backticks/${}
   python3 <<'PYEOF'
 import sys
 
-path = "src/auto-reply/reply/agent-runner.ts"
+path = "src/auto-reply/reply/agent-runner-reminder-guard.ts"
 with open(path, "r") as f:
     content = f.read()
 
@@ -61,7 +60,6 @@ fi
 if grep -q 'systemNote?: string' "$TYPES" 2>/dev/null; then
   echo "SKIP: $TYPES already patched (systemNote field present)"
 else
-  # Insert two lines after `isError?: boolean;`
   sed -i.bak '/^  isError?: boolean;$/a\
   /** Internal system note (not sent to channels). Used for guardrail annotations. */\
   systemNote?: string;' "$TYPES"

@@ -62,8 +62,9 @@ if old1 not in content:
 content = content.replace(old1, new1, 1)
 
 # 4) Pass writeOptions to first writeConfigFile (legacy migration)
-old2 = '    await writeConfigFile(migrated);\n    if (changes.length > 0) {'
-new2 = '    await writeConfigFile(migrated, configRead.writeOptions);\n    if (changes.length > 0) {'
+# v2026.3.7: indentation changed to 6 spaces (extra nesting level)
+old2 = '      await writeConfigFile(migrated);\n      if (changes.length > 0) {'
+new2 = '      await writeConfigFile(migrated, configRead.writeOptions);\n      if (changes.length > 0) {'
 
 if old2 not in content:
     print("    FAIL: #24379 server.impl.ts writeConfigFile(migrated) pattern not found", file=sys.stderr)

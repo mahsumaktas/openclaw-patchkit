@@ -4,6 +4,7 @@
 # resolveDiscordSnapshotMessageText, and resolveDiscordThreadStarter.
 # Embed metadata (titles/descriptions) can come from remote URLs and must
 # stay untrusted unless explicitly requested via web tools.
+# Updated for v2026.3.7: resolveDiscordMessageText now uses rawText (not baseText)
 set -euo pipefail
 SRC="${1:-.}/src"
 
@@ -23,12 +24,12 @@ path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# Remove embedText variable and its use in resolveDiscordMessageText
+# v2026.3.7 uses rawText instead of baseText
 old = '''  const embedText = resolveDiscordEmbedText(
     (message.embeds?.[0] as { title?: string | null; description?: string | null } | undefined) ??
       null,
   );
-  const baseText =
+  const rawText =
     message.content?.trim() ||
     buildDiscordMediaPlaceholder({
       attachments: message.attachments ?? undefined,
@@ -38,7 +39,7 @@ old = '''  const embedText = resolveDiscordEmbedText(
     options?.fallbackText?.trim() ||
     "";'''
 
-new = '''  const baseText =
+new = '''  const rawText =
     message.content?.trim() ||
     buildDiscordMediaPlaceholder({
       attachments: message.attachments ?? undefined,

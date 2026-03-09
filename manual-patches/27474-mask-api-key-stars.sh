@@ -5,12 +5,9 @@
 # and /model status output. Even partial key exposure is a security risk.
 #
 # Fix: Replace tiered masking with simple "****" for all non-empty keys.
-# model-auth-label.ts already delegates to maskApiKey in v2026.2.26, so
-# changing maskApiKey fixes both locations.
-#
-# Changes:
-#   1. src/utils/mask-api-key.ts — return "****" for all non-empty values
-#   2. src/agents/model-auth-label.ts — simplify formatApiKeySnippet
+# v2026.3.7: model-auth-label.ts was refactored — no longer uses maskApiKey
+# directly. It now resolves auth labels via profile store.
+# Only mask-api-key.ts needs patching.
 set -euo pipefail
 
 SRC="${1:-.}/src"
@@ -21,7 +18,7 @@ if grep -q 'return "\*\*\*\*"' "$SRC/utils/mask-api-key.ts" 2>/dev/null; then
   exit 0
 fi
 
-# ── 1. mask-api-key.ts ─────────────────────────────────────────────────────
+# ── mask-api-key.ts ──────────────────────────────────────────────────────
 python3 - "$SRC/utils/mask-api-key.ts" << 'PYEOF'
 import sys
 
@@ -64,41 +61,4 @@ print("    OK: #27474 mask-api-key.ts patched")
 
 PYEOF
 
-# ── 2. model-auth-label.ts — simplify formatApiKeySnippet ─────────────────
-python3 - "$SRC/agents/model-auth-label.ts" << 'PYEOF'
-import sys
-
-filepath = sys.argv[1]
-with open(filepath, "r") as f:
-    code = f.read()
-
-old = """\
-function formatApiKeySnippet(apiKey: string): string {
-  const compact = apiKey.replace(/\\s+/g, "");
-  if (!compact) {
-    return "unknown";
-  }
-  return maskApiKey(compact);
-}"""
-
-new = """\
-function formatApiKeySnippet(apiKey: string): string {
-  if (!apiKey.replace(/\\s+/g, "")) {
-    return "unknown";
-  }
-  return "****";
-}"""
-
-if old not in code:
-    print("    FAIL: #27474 formatApiKeySnippet not found in model-auth-label.ts", file=sys.stderr)
-    sys.exit(1)
-
-code = code.replace(old, new, 1)
-
-with open(filepath, "w") as f:
-    f.write(code)
-print("    OK: #27474 model-auth-label.ts patched")
-
-PYEOF
-
-echo "    OK: #27474 fully applied"
+echo "    OK: #27474 fully applied (mask-api-key.ts only; model-auth-label.ts refactored upstream)"

@@ -25,17 +25,16 @@ with open(path, 'r') as f:
     content = f.read()
 
 # 1a) Add RESUME_RECOVERY_WAIT_TIMEOUT_MS and RESTART_INTERRUPTED_ERROR constants
-old_const = 'const ANNOUNCE_EXPIRY_MS = 5 * 60_000; // 5 minutes\ntype SubagentRunOrphanReason'
-new_const = '''const ANNOUNCE_EXPIRY_MS = 5 * 60_000; // 5 minutes
-const RESUME_RECOVERY_WAIT_TIMEOUT_MS = 30_000;
-const RESTART_INTERRUPTED_ERROR = "subagent run interrupted by gateway restart (requeue required)";
-type SubagentRunOrphanReason'''
-
-if old_const not in content:
-    print("    FAIL: #26441 subagent-registry.ts ANNOUNCE_EXPIRY_MS pattern not found", file=sys.stderr)
+# v2026.3.7 added ANNOUNCE_COMPLETION_HARD_EXPIRY_MS between ANNOUNCE_EXPIRY_MS and type
+import re as re_mod
+pat = re_mod.compile(r'(const ANNOUNCE_EXPIRY_MS = 5 \* 60_000; // 5 minutes\n)')
+m = pat.search(content)
+if not m:
+    print("    FAIL: #26441 subagent-registry.ts ANNOUNCE_EXPIRY_MS not found", file=sys.stderr)
     sys.exit(1)
-
-content = content.replace(old_const, new_const, 1)
+insert_after = m.end()
+constants = 'const RESUME_RECOVERY_WAIT_TIMEOUT_MS = 30_000;\nconst RESTART_INTERRUPTED_ERROR = "subagent run interrupted by gateway restart (requeue required)";\n'
+content = content[:insert_after] + constants + content[insert_after:]
 
 # 1b) Update resumeSubagentRun: cap wait timeout + pass recoveryProbe
 old_resume = '''  // Wait for completion again after restart.

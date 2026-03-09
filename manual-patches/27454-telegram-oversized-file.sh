@@ -1,83 +1,103 @@
 #!/usr/bin/env bash
 # PR #27454 — fix(telegram): prevent crash loop on oversized file attachments
+# v2026.3.7: delivery.resolve-media.ts was refactored — no more inline getFile().
+# resolveTelegramFileWithRetry() is now a standalone function. The pre-download
+# size check goes before the resolveTelegramFileWithRetry call in the main resolve
+# function, using the `m` variable from resolveMediaFileRef (has file_size).
+#
 # Two changes:
-# 1. delivery.ts: Pre-download size check using file_size metadata + import MediaFetchError
+# 1. delivery.resolve-media.ts: Import MediaFetchError + pre-download file_size check
+#    before resolveTelegramFileWithRetry() — skip download if file_size > 50MB
 # 2. bot-handlers.ts: Strengthen isMediaSizeLimitError to detect MediaFetchError instances
-# NOTE: PR diff omits the MediaFetchError import — we add it manually.
-set -euo pipefail
+set +e
 
 SRC="${1:?Usage: $0 <openclaw-source-dir>}/src"
-DELIVERY="$SRC/telegram/bot/delivery.ts"
+
+RESOLVE_MEDIA="$SRC/telegram/bot/delivery.resolve-media.ts"
 HANDLERS="$SRC/telegram/bot-handlers.ts"
 
 # ── Idempotency check ──
-if grep -q 'Pre-download size check' "$DELIVERY" 2>/dev/null; then
+if grep -q 'Pre-download size check' "$RESOLVE_MEDIA" 2>/dev/null; then
   echo "    SKIP: #27454 already applied"
   exit 0
 fi
 
-[ -f "$DELIVERY" ] || { echo "    FAIL: $DELIVERY not found"; exit 1; }
-[ -f "$HANDLERS" ] || { echo "    FAIL: $HANDLERS not found"; exit 1; }
+[ -f "$RESOLVE_MEDIA" ] || { echo "    FAIL: $RESOLVE_MEDIA not found"; exit 1; }
+[ -f "$HANDLERS" ]      || { echo "    FAIL: $HANDLERS not found"; exit 1; }
 
-# ── 1. delivery.ts: Add MediaFetchError import + pre-download size check ──
-python3 - "$DELIVERY" << 'PYEOF'
-import sys
+# ── 1. delivery.resolve-media.ts: Add MediaFetchError import + pre-download size check ──
+python3 - "$RESOLVE_MEDIA" << 'PYEOF'
+import sys, re
 
 path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
+changed = False
+
 # 1a. Add MediaFetchError to the fetch.js import
 if 'MediaFetchError' not in content:
-    old_import = 'import { fetchRemoteMedia } from "../../media/fetch.js";'
-    new_import = 'import { fetchRemoteMedia, MediaFetchError } from "../../media/fetch.js";'
-    if old_import in content:
-        content = content.replace(old_import, new_import, 1)
-        print("    OK: #27454 MediaFetchError import added to delivery.ts")
+    pat = re.compile(
+        r'(import\s*\{[^}]*fetchRemoteMedia[^}]*\}\s*from\s*["\'][^"\']*media/fetch\.js["\'];)'
+    )
+    m = pat.search(content)
+    if m:
+        old_imp = m.group(1)
+        new_imp = old_imp.replace('{ fetchRemoteMedia }', '{ fetchRemoteMedia, MediaFetchError }')
+        if new_imp == old_imp:
+            new_imp = old_imp.replace('fetchRemoteMedia', 'fetchRemoteMedia, MediaFetchError', 1)
+        content = content.replace(old_imp, new_imp, 1)
+        changed = True
+        print("    OK: #27454 MediaFetchError import added to delivery.resolve-media.ts")
     else:
-        # Try alternate import path
-        import re
-        m = re.search(r'import \{ fetchRemoteMedia \} from ["\']([^"\']+)["\'];', content)
-        if m:
-            old = m.group(0)
-            new = old.replace('{ fetchRemoteMedia }', '{ fetchRemoteMedia, MediaFetchError }')
-            content = content.replace(old, new, 1)
-            print("    OK: #27454 MediaFetchError import added (alt path)")
-        else:
-            print("    FAIL: #27454 fetchRemoteMedia import not found")
-            sys.exit(1)
+        print("    FAIL: #27454 fetchRemoteMedia import not found in delivery.resolve-media.ts")
+        sys.exit(1)
 
-# 1b. Add pre-download size check before the ctx.getFile() call
-old_block = '  let file: { file_path?: string };\n  try {\n    file = await retryAsync(() => ctx.getFile(), {'
-new_block = '''  // Pre-download size check: Telegram provides file_size in the message metadata.
-  // Reject early to avoid downloading large files we'll discard anyway (#26246).
-  if (maxBytes && "file_size" in m && typeof m.file_size === "number" && m.file_size > maxBytes) {
+# 1b. v2026.3.7: resolveTelegramFileWithRetry replaced inline getFile.
+# Insert pre-download size check before the main resolveTelegramFileWithRetry call
+# (the one after resolveMediaFileRef, around "const file = await resolveTelegramFileWithRetry").
+# The `m` variable from resolveMediaFileRef has file_size metadata.
+MARKER = '  const file = await resolveTelegramFileWithRetry(ctx);\n  if (!file) {\n    return null;\n  }\n  if (!file.file_path) {\n    throw new Error("Telegram getFile returned no file_path");'
+
+SIZE_CHECK = """  // Pre-download size check: Telegram provides file_size in message metadata.
+  // Bots cannot download files > 50 MB. Reject early to avoid a crash loop
+  // where ctx.getFile() hangs or throws on oversized files (#27454).
+  const TELEGRAM_BOT_FILE_LIMIT = 50 * 1024 * 1024; // 50 MB
+  if (m && "file_size" in m && typeof m.file_size === "number" && m.file_size > TELEGRAM_BOT_FILE_LIMIT) {
     const sizeMb = (m.file_size / (1024 * 1024)).toFixed(1);
-    const limitMb = (maxBytes / (1024 * 1024)).toFixed(0);
     throw new MediaFetchError(
       "max_bytes",
-      `File size ${sizeMb}MB exceeds maxBytes limit of ${limitMb}MB`,
+      `File size ${sizeMb}MB exceeds Telegram bot download limit of 50MB`,
     );
   }
 
-  let file: { file_path?: string };
-  try {
-    file = await retryAsync(() => ctx.getFile(), {'''
+"""
 
 if 'Pre-download size check' not in content:
-    if old_block in content:
-        content = content.replace(old_block, new_block, 1)
-        print("    OK: #27454 pre-download size check added to delivery.ts")
+    if MARKER in content:
+        content = content.replace(MARKER, SIZE_CHECK + MARKER, 1)
+        changed = True
+        print("    OK: #27454 pre-download size check added to delivery.resolve-media.ts")
     else:
-        print("    FAIL: #27454 ctx.getFile() marker not found in delivery.ts")
-        sys.exit(1)
+        # Fallback: try a simpler marker
+        simple_marker = '  const file = await resolveTelegramFileWithRetry(ctx);\n  if (!file) {'
+        if simple_marker in content:
+            content = content.replace(simple_marker, SIZE_CHECK + simple_marker, 1)
+            changed = True
+            print("    OK: #27454 pre-download size check added (simple marker) to delivery.resolve-media.ts")
+        else:
+            print("    FAIL: #27454 resolveTelegramFileWithRetry marker not found in delivery.resolve-media.ts")
+            sys.exit(1)
 
-with open(path, 'w') as f:
-    f.write(content)
+if changed:
+    with open(path, 'w') as f:
+        f.write(content)
+else:
+    print("    SKIP: #27454 delivery.resolve-media.ts already has all changes")
 PYEOF
 
 if [ $? -ne 0 ]; then
-  echo "    FAIL: Could not patch delivery.ts"
+  echo "    FAIL: Could not patch delivery.resolve-media.ts"
   exit 1
 fi
 
@@ -89,28 +109,13 @@ path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# Check if MediaFetchError is imported
-if 'MediaFetchError' not in content:
-    # Add import — find the media/fetch import or add near top
-    import re
-    m = re.search(r'(import \{[^}]*\} from ["\'].*?/media/fetch\.js["\'];)', content)
-    if m:
-        old = m.group(1)
-        if 'MediaFetchError' not in old:
-            new = old.replace('{ ', '{ MediaFetchError, ')
-            content = content.replace(old, new, 1)
-            print("    OK: #27454 MediaFetchError import added to bot-handlers.ts")
-    else:
-        # Add a new import line after the last import
-        last_import = content.rfind('\nimport ')
-        if last_import >= 0:
-            end_of_line = content.index('\n', last_import + 1)
-            content = content[:end_of_line+1] + 'import { MediaFetchError } from "./bot/media-fetch.js";\n' + content[end_of_line+1:]
-            print("    WARN: #27454 MediaFetchError import added with guessed path — may need review")
+# v2026.3.7: MediaFetchError is already imported in bot-handlers.ts
+# isMediaSizeLimitError currently only checks string patterns.
+# isRecoverableMediaGroupError already uses MediaFetchError instanceof check.
+# Add MediaFetchError instanceof check to isMediaSizeLimitError too.
+OLD_CHECK = 'function isMediaSizeLimitError(err: unknown): boolean {\n  const errMsg = String(err);\n  return errMsg.includes("exceeds") && errMsg.includes("MB limit");\n}'
 
-old_check = 'function isMediaSizeLimitError(err: unknown): boolean {\n  const errMsg = String(err);\n  return errMsg.includes("exceeds") && errMsg.includes("MB limit");\n}'
-
-new_check = '''function isMediaSizeLimitError(err: unknown): boolean {
+NEW_CHECK = '''function isMediaSizeLimitError(err: unknown): boolean {
   if (err instanceof MediaFetchError && err.code === "max_bytes") {
     return true;
   }
@@ -118,16 +123,29 @@ new_check = '''function isMediaSizeLimitError(err: unknown): boolean {
   return errMsg.includes("exceeds") && (errMsg.includes("MB limit") || errMsg.includes("maxBytes"));
 }'''
 
-if 'err instanceof MediaFetchError' in content:
+if 'err instanceof MediaFetchError && err.code === "max_bytes"' in content:
     print("    SKIP: #27454 bot-handlers.ts already patched")
 else:
-    if old_check in content:
-        content = content.replace(old_check, new_check, 1)
+    if OLD_CHECK in content:
+        content = content.replace(OLD_CHECK, NEW_CHECK, 1)
         with open(path, 'w') as f:
             f.write(content)
-        print("    OK: #27454 bot-handlers.ts patched")
+        print("    OK: #27454 isMediaSizeLimitError strengthened in bot-handlers.ts")
     else:
-        print("    WARN: #27454 isMediaSizeLimitError pattern not found — may already be modified")
+        # Try relaxed match
+        import re
+        pat = re.compile(
+            r'function isMediaSizeLimitError\(err:\s*unknown\):\s*boolean\s*\{[^}]+\}',
+            re.DOTALL,
+        )
+        m = pat.search(content)
+        if m:
+            content = content[:m.start()] + NEW_CHECK + content[m.end():]
+            with open(path, 'w') as f:
+                f.write(content)
+            print("    OK: #27454 isMediaSizeLimitError replaced (relaxed match) in bot-handlers.ts")
+        else:
+            print("    WARN: #27454 isMediaSizeLimitError not found in bot-handlers.ts — may need manual review")
 PYEOF
 
 echo "    DONE: 27454-telegram-oversized-file applied"
