@@ -81,40 +81,49 @@ if old_clear not in content:
 
 content = content.replace(old_clear, new_clear, 1)
 
-# --- PART 4: Add branch() call before originalAppend in toolResult handling ---
-# v2026.3.2 has (after #25169 patch or without):
-#       if (!persisted) {
-#         return undefined;
-#       }
-#       return originalAppend(persisted as never);
-old_append = '''      if (!persisted) {
+# --- PART 4: Add branch() call before append in toolResult handling ---
+# v2026.3.2 uses originalAppend, v2026.3.8+ may use safeAppend
+old_append_original = '''      if (!persisted) {
         return undefined;
       }
       return originalAppend(persisted as never);
     }'''
 
-new_append = '''      if (!persisted) {
+old_append_safe = '''      if (!persisted) {
         return undefined;
       }
+      return safeAppend(persisted as never);
+    }'''
+
+if old_append_original in content:
+    append_fn = 'originalAppend'
+    old_append = old_append_original
+elif old_append_safe in content:
+    append_fn = 'safeAppend'
+    old_append = old_append_safe
+else:
+    print(f"FAIL #31909 part 4: could not find toolResult append block (tried originalAppend and safeAppend) in {filepath}")
+    sys.exit(1)
+
+new_append = f'''      if (!persisted) {{
+        return undefined;
+      }}
       // FIX: Branch to assistant message before appending tool result.
       // This ensures all tool results from the same assistant message have
       // the assistant message as their parent, not the previous tool result.
-      if (assistantEntryId) {
+      if (assistantEntryId) {{
         sessionManager.branch(assistantEntryId);
-      }
-      const result = originalAppend(persisted as never);
+      }}
+      const result = {append_fn}(persisted as never);
       // Clear assistant entry ID when all pending tool results are done
-      if (pendingState.size() === 0) {
+      if (pendingState.size() === 0) {{
         assistantEntryId = null;
-      }
+      }}
       return result;
-    }'''
-
-if old_append not in content:
-    print(f"FAIL #31909 part 4: could not find toolResult originalAppend block in {filepath}")
-    sys.exit(1)
+    }}'''
 
 content = content.replace(old_append, new_append, 1)
+print(f"OK #31909 part 4: patched {append_fn} with branch() call")
 
 # --- PART 5: Store assistantEntryId when tool calls are tracked ---
 # v2026.3.2 has:

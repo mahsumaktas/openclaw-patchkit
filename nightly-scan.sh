@@ -380,7 +380,7 @@ else
 
   OPENCLAW_ROOT_RESOLVED="$(npm root -g 2>/dev/null || echo '/Users/mahsum/.npm-global/lib/node_modules')/openclaw"
   OPENCLAW_TAG=$(node -e "console.log('v'+require('$OPENCLAW_ROOT_RESOLVED/package.json').version)" 2>/dev/null || true)
-  OPENCLAW_TAG="${OPENCLAW_TAG:-v2026.3.7}"
+  OPENCLAW_TAG="${OPENCLAW_TAG:-v2026.3.8}"
 
   node -e "
   const fs = require('fs');

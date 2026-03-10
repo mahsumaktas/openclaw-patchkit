@@ -113,23 +113,36 @@ path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# 2a) Add import
-old_import = '''import {
+# 2a) Add import — handle both with and without repairLoneSurrogates
+old_import_with_rls = '''import {
+  repairLoneSurrogates,
   sanitizeToolCallInputs,
   stripToolResultDetails,
   sanitizeToolUseResultPairing,'''
 
-new_import = '''import {
+old_import_without_rls = '''import {
+  sanitizeToolCallInputs,
+  stripToolResultDetails,
+  sanitizeToolUseResultPairing,'''
+
+if old_import_with_rls in content:
+    new_import = '''import {
+  dropOrphanToolResults,
+  repairLoneSurrogates,
+  sanitizeToolCallInputs,
+  stripToolResultDetails,
+  sanitizeToolUseResultPairing,'''
+    content = content.replace(old_import_with_rls, new_import, 1)
+elif old_import_without_rls in content:
+    new_import = '''import {
   dropOrphanToolResults,
   sanitizeToolCallInputs,
   stripToolResultDetails,
   sanitizeToolUseResultPairing,'''
-
-if old_import not in content:
+    content = content.replace(old_import_without_rls, new_import, 1)
+else:
     print("    FAIL: #24759 google.ts import pattern not found", file=sys.stderr)
     sys.exit(1)
-
-content = content.replace(old_import, new_import, 1)
 
 # 2b) Move isOpenAIResponsesApi up and add dropOrphanToolResults fallback
 old_repair = '''  const repairedTools = policy.repairToolUseResultPairing

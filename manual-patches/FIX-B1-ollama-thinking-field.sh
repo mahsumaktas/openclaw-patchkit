@@ -37,8 +37,9 @@ for TARGET in "${FILES[@]}"; do
   BASENAME="$(basename "$TARGET")"
 
   # ── Idempotency check ───────────────────────────────────────────────────
-  if grep -q 'message?.thinking' "$TARGET" 2>/dev/null; then
-    echo "    SKIP: $BASENAME (already applied)"
+  # v2026.3.8+: message.thinking fallback is upstream, only check think:false
+  if grep -q 'think: false' "$TARGET" 2>/dev/null; then
+    echo "    SKIP: $BASENAME (think:false already applied)"
     SKIPPED+=("$BASENAME")
     continue
   fi
@@ -73,16 +74,13 @@ if old in content:
 else:
     print("      WARN: Could not find body pattern for think:false")
 
-# Patch 2: Add message.thinking fallback in stream accumulator
-old2 = 'else if (chunk.message?.reasoning) accumulatedContent += chunk.message.reasoning;'
-new2 = ('else if (chunk.message?.reasoning) accumulatedContent += chunk.message.reasoning;\n'
-        '\t\t\t\t\telse if (chunk.message?.thinking) accumulatedContent += chunk.message.thinking;')
-if old2 in content:
-    content = content.replace(old2, new2)
-    print("      + message.thinking fallback in stream accumulator")
-    applied += 1
+# Patch 2: message.thinking fallback — UPSTREAM in v2026.3.8+, skip
+# Kept as comment for pre-v2026.3.8 compatibility reference
+# old2 = 'else if (chunk.message?.reasoning) accumulatedContent += chunk.message.reasoning;'
+if 'message?.thinking' in content:
+    print("      ~ message.thinking fallback already upstream")
 else:
-    print("      WARN: Could not find reasoning pattern for thinking fallback")
+    print("      WARN: message.thinking fallback not found (unexpected)")
 
 with open(path, 'w') as f:
     f.write(content)

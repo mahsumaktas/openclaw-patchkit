@@ -71,14 +71,21 @@ else:
 
 # 1b. Replace error/aborted handling in repairToolUseResultPairing
 # Strip tool_use blocks, keep text content
+# Upstream detection: if assistant.content.length === 0 check already exists near
+# stopReason === "aborted", the fix has been merged upstream — skip part 1b.
 if 'nonToolContent' not in content:
-    old_errored = '''    const stopReason = (assistant as { stopReason?: string }).stopReason;
+    import re
+    upstream_pattern = r'stopReason === "aborted"[\s\S]{0,300}assistant\.content\.length === 0'
+    if re.search(upstream_pattern, content):
+        print(f"OK #14328 part 1b: already upstream (content filtering for error/aborted)")
+    else:
+        old_errored = '''    const stopReason = (assistant as { stopReason?: string }).stopReason;
     if (stopReason === "error" || stopReason === "aborted") {
       out.push(msg);
       continue;
     }'''
 
-    new_errored = '''    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
+        new_errored = '''    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
     // (e.g., partialJson: true). Leaving them in the transcript causes permanent 400
     // errors from the Anthropic API ("unexpected tool_use_id found in tool_result blocks")
     // because the incomplete tool_use has no matching tool_result.
@@ -102,14 +109,13 @@ if 'nonToolContent' not in content:
       continue;
     }'''
 
-    if old_errored not in content:
-        # Try alternate pattern — maybe already partially modified or comments differ
-        # Look for the core pattern
-        import re
-        pattern = r'(    const stopReason = \(assistant as \{ stopReason\?: string \}\)\.stopReason;\s*\n\s*if \(stopReason === "error" \|\| stopReason === "aborted"\) \{\s*\n\s*)out\.push\(msg\);\s*\n\s*continue;\s*\n\s*\}'
-        match = re.search(pattern, content)
-        if match:
-            replacement = match.group(1) + '''if (Array.isArray(assistant.content)) {
+        if old_errored not in content:
+            # Try alternate pattern — maybe already partially modified or comments differ
+            # Look for the core pattern
+            pattern = r'(    const stopReason = \(assistant as \{ stopReason\?: string \}\)\.stopReason;\s*\n\s*if \(stopReason === "error" \|\| stopReason === "aborted"\) \{\s*\n\s*)out\.push\(msg\);\s*\n\s*continue;\s*\n\s*\}'
+            match = re.search(pattern, content)
+            if match:
+                replacement = match.group(1) + '''if (Array.isArray(assistant.content)) {
         const nonToolContent = assistant.content.filter((block) => !isRawToolCallBlock(block));
         if (nonToolContent.length > 0) {
           out.push({ ...msg, content: nonToolContent } as AgentMessage);
@@ -123,16 +129,16 @@ if 'nonToolContent' not in content:
       }
       continue;
     }'''
-            content = content[:match.start()] + replacement + content[match.end():]
-            changed = True
-            print(f"OK #14328 part 1b: patched error/aborted handling (regex)")
+                content = content[:match.start()] + replacement + content[match.end():]
+                changed = True
+                print(f"OK #14328 part 1b: patched error/aborted handling (regex)")
+            else:
+                print(f"FAIL #14328 part 1b: could not find error/aborted handling in {filepath}")
+                sys.exit(1)
         else:
-            print(f"FAIL #14328 part 1b: could not find error/aborted handling in {filepath}")
-            sys.exit(1)
-    else:
-        content = content.replace(old_errored, new_errored, 1)
-        changed = True
-        print(f"OK #14328 part 1b: patched error/aborted handling")
+            content = content.replace(old_errored, new_errored, 1)
+            changed = True
+            print(f"OK #14328 part 1b: patched error/aborted handling")
 else:
     print(f"SKIP #14328 part 1b: nonToolContent filter already present")
 
