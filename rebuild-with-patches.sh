@@ -252,16 +252,23 @@ if [ $APPLIED -eq 0 ]; then
   exit 1
 fi
 
-# ── Step 2a-fix: Apply FIX-* manual patch scripts ─────────────────────────────
+# ── Step 2a-fix: Apply FIX-* manual patch scripts (pre-build: src patches) ────
 FIX_APPLIED=0
 FIX_FAILED=0
+FIX_DIST_SCRIPTS=()
 FIX_SCRIPTS=("$MANUAL_DIR"/FIX-*-*.sh)
 
 if [ -f "${FIX_SCRIPTS[0]}" ]; then
   echo ""
-  info "Applying ${#FIX_SCRIPTS[@]} fix scripts..."
+  info "Applying FIX scripts (pre-build)..."
   for fix_script in "${FIX_SCRIPTS[@]}"; do
     fix_name=$(basename "$fix_script" .sh)
+    # FIX-B* scripts are dist-only patches — defer to post-build
+    if [[ "$fix_name" == FIX-B* ]]; then
+      FIX_DIST_SCRIPTS+=("$fix_script")
+      [ "$VERBOSE" = true ] && info "$fix_name deferred to post-build (dist-only)"
+      continue
+    fi
     if bash "$fix_script" "$WORKDIR" 2>&1 | { if [ "$VERBOSE" = true ]; then while read -r line; do echo "    $line"; done; else cat >/dev/null; fi; }; then
       [ "$VERBOSE" = true ] && ok "$fix_name applied"
       FIX_APPLIED=$((FIX_APPLIED + 1))
@@ -270,7 +277,7 @@ if [ -f "${FIX_SCRIPTS[0]}" ]; then
       FIX_FAILED=$((FIX_FAILED + 1))
     fi
   done
-  ok "Fixes: $FIX_APPLIED/${#FIX_SCRIPTS[@]} applied"
+  ok "Fixes (pre-build): $FIX_APPLIED applied"
 fi
 
 # ── Step 2b: Apply expansion scripts ─────────────────────────────────────────
@@ -369,6 +376,27 @@ else
   find "$OPENCLAW_ROOT/dist" -mindepth 1 -delete 2>/dev/null || true
   cp -R "$BACKUP_DIR/"* "$OPENCLAW_ROOT/dist/"
   exit 1
+fi
+
+# ── Step 5b: Apply dist-only FIX scripts (post-build) ────────────────────────
+FIX_DIST_APPLIED=0
+FIX_DIST_FAILED=0
+if [ ${#FIX_DIST_SCRIPTS[@]} -gt 0 ]; then
+  echo ""
+  info "Applying ${#FIX_DIST_SCRIPTS[@]} dist-only FIX scripts..."
+  for fix_script in "${FIX_DIST_SCRIPTS[@]}"; do
+    fix_name=$(basename "$fix_script" .sh)
+    if bash "$fix_script" "$OPENCLAW_ROOT/dist" 2>&1 | { if [ "$VERBOSE" = true ]; then while read -r line; do echo "    $line"; done; else cat >/dev/null; fi; }; then
+      [ "$VERBOSE" = true ] && ok "$fix_name applied (dist)"
+      FIX_DIST_APPLIED=$((FIX_DIST_APPLIED + 1))
+      FIX_APPLIED=$((FIX_APPLIED + 1))
+    else
+      warn "$fix_name FAILED (dist)"
+      FIX_DIST_FAILED=$((FIX_DIST_FAILED + 1))
+      FIX_FAILED=$((FIX_FAILED + 1))
+    fi
+  done
+  ok "Fixes (dist): $FIX_DIST_APPLIED/${#FIX_DIST_SCRIPTS[@]} applied"
 fi
 
 # ── Step 6: Cleanup ──────────────────────────────────────────────────────────

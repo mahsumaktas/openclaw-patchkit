@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
+# PR #26337 — security: detect secrets in inbound messages
+# 2 files: security/detect-inbound-secrets.ts (new), auto-reply/reply/get-reply-run.ts (edit)
+# (tests skipped)
+#
+# Creates detect-inbound-secrets.ts with containsSecretPatterns() and
+# buildSecretDetectionWarning(), then wires it into get-reply-run.ts
+# to add a system prompt warning when secrets are detected.
 set -euo pipefail
-cd "$1"
+SRC="${1:-.}/src"
 
-PATCH_ID="PR-26337"
-MARKER="buildSecretDetectionWarning"
+SECRETS="$SRC/security/detect-inbound-secrets.ts"
+REPLY="$SRC/auto-reply/reply/get-reply-run.ts"
 
-# --- File 1: NEW FILE src/security/detect-inbound-secrets.ts ---
-FILE1="src/security/detect-inbound-secrets.ts"
+# ── Idempotency ──
+if [ -f "$SECRETS" ] && grep -q 'buildSecretDetectionWarning' "$REPLY" 2>/dev/null; then
+  echo "    SKIP: #26337 already applied"
+  exit 0
+fi
 
-if [[ -f "$FILE1" ]] && grep -q "$MARKER" "$FILE1"; then
-  echo "$PATCH_ID: $FILE1 already patched (idempotent skip)"
-else
-  mkdir -p "$(dirname "$FILE1")"
-  cat > "$FILE1" << 'TSEOF'
+# ── File checks ──
+[ -d "$SRC/security" ] || { echo "    FAIL: #26337 $SRC/security not found"; exit 1; }
+[ -f "$REPLY" ] || { echo "    FAIL: #26337 $REPLY not found"; exit 1; }
+
+# ── 1. Create detect-inbound-secrets.ts ──
+if [ ! -f "$SECRETS" ]; then
+  cat > "$SECRETS" << 'TSEOF'
 import { compileSafeRegex } from "./safe-regex.js";
 
 /**
@@ -97,45 +109,45 @@ export function buildSecretDetectionWarning(messageBody: string): string | undef
   return SECRET_WARNING_SYSTEM_PROMPT;
 }
 TSEOF
-  echo "$PATCH_ID: Created $FILE1"
-fi
-
-# --- File 2: src/auto-reply/reply/get-reply-run.ts ---
-FILE2="src/auto-reply/reply/get-reply-run.ts"
-
-if [[ ! -f "$FILE2" ]]; then
-  echo "$PATCH_ID: ERROR - $FILE2 not found"
-  exit 1
-fi
-
-if grep -q "$MARKER" "$FILE2"; then
-  echo "$PATCH_ID: $FILE2 already patched (idempotent skip)"
+  echo "    OK: #26337 detect-inbound-secrets.ts created"
 else
-  python3 - "$FILE2" << 'PYEOF'
+  echo "    SKIP: #26337 detect-inbound-secrets.ts already exists"
+fi
+
+# ── 2. Wire into get-reply-run.ts ──
+if ! grep -q 'buildSecretDetectionWarning' "$REPLY" 2>/dev/null; then
+  python3 - "$REPLY" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
 
-# 1. Add import after normalizeMainKey import
+# Part 2a: Add import after the normalizeMainKey import
 old_import = 'import { normalizeMainKey } from "../../routing/session-key.js";'
-new_import = old_import + '\nimport { buildSecretDetectionWarning } from "../../security/detect-inbound-secrets.js";'
+new_import = '''import { normalizeMainKey } from "../../routing/session-key.js";
+import { buildSecretDetectionWarning } from "../../security/detect-inbound-secrets.js";'''
+
 if old_import not in content:
-    print(f"ERROR: Could not find import anchor in {filepath}", file=sys.stderr)
+    print("    FAIL: #26337 cannot find normalizeMainKey import", file=sys.stderr)
     sys.exit(1)
+
+if 'buildSecretDetectionWarning' in content:
+    print("    SKIP: #26337 get-reply-run.ts import already present")
+    sys.exit(0)
+
 content = content.replace(old_import, new_import, 1)
 
-# 2. Add secretWarning call and inject into extraSystemPromptParts array
-# Find the existing array pattern
-old_array = '''  const extraSystemPromptParts = [
+# Part 2b: Add secretWarning to extraSystemPromptParts
+# v2026.3.8 uses extraSystemPromptParts array (not the old join pattern)
+old_parts = '''  const extraSystemPromptParts = [
     inboundMetaPrompt,
     groupChatContext,
     groupIntro,
     groupSystemPrompt,
   ].filter(Boolean);'''
 
-new_array = '''  const secretWarning = buildSecretDetectionWarning(
+new_parts = '''  const secretWarning = buildSecretDetectionWarning(
     ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "",
   );
   const extraSystemPromptParts = [
@@ -146,17 +158,16 @@ new_array = '''  const secretWarning = buildSecretDetectionWarning(
     secretWarning,
   ].filter(Boolean);'''
 
-if old_array not in content:
-    print(f"ERROR: Could not find extraSystemPromptParts array in {filepath}", file=sys.stderr)
+if old_parts not in content:
+    print("    FAIL: #26337 cannot find extraSystemPromptParts array", file=sys.stderr)
     sys.exit(1)
-content = content.replace(old_array, new_array, 1)
 
-with open(filepath, 'w') as f:
+content = content.replace(old_parts, new_parts, 1)
+
+with open(path, 'w') as f:
     f.write(content)
-
-print(f"Patched {filepath}")
+print("    OK: #26337 get-reply-run.ts — secretWarning wired into extraSystemPromptParts")
 PYEOF
-  echo "$PATCH_ID: Patched $FILE2"
 fi
 
-echo "$PATCH_ID: Done"
+echo "    OK: #26337 detect inbound secrets applied"

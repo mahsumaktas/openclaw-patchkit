@@ -1,58 +1,60 @@
 #!/usr/bin/env bash
-set -euo pipefail
-cd "$1"
-
-# PR #31909 — Ensure parallel tool results have correct parentId
-# When multiple tool results come from the same assistant message, they should
-# all reference the assistant message as parent (not chain to each other).
-# Uses sessionManager.branch(assistantEntryId) + sessionManager.getLeafId().
+# PR #31909 — fix(agents): ensure parallel tool results have correct parentId
+# 1 file: session-tool-result-guard.ts (tests skipped)
 #
-# NOTE: v2026.3.2 uses createPendingToolCallState() abstraction instead of raw Map.
-# The patch adds assistantEntryId tracking + branch() calls before appending tool results.
+# Problem: When multiple tool results come from the same assistant message,
+# they get chained parentIds (assistant -> result1 -> result2) instead of
+# all pointing to the assistant message. This causes Anthropic API 400 errors.
+#
+# Fix: Track assistantEntryId, branch to it before appending each tool result.
+# Uses pendingState API (v2026.3.8).
+set -euo pipefail
+SRC="${1:-.}/src"
 
-FILE="src/agents/session-tool-result-guard.ts"
+GUARD="$SRC/agents/session-tool-result-guard.ts"
 
-if [[ ! -f "$FILE" ]]; then
-  echo "SKIP #31909: $FILE not found"
+# ── Idempotency ──
+if grep -q 'assistantEntryId' "$GUARD" 2>/dev/null; then
+  echo "    SKIP: #31909 already applied"
   exit 0
 fi
 
-# Idempotency
-if grep -q 'assistantEntryId' "$FILE" 2>/dev/null; then
-  echo "SKIP #31909: already patched (assistantEntryId found)"
-  exit 0
-fi
+# ── File checks ──
+[ -f "$GUARD" ] || { echo "    FAIL: #31909 $GUARD not found"; exit 1; }
 
-python3 - "$FILE" << 'PYEOF'
+python3 - "$GUARD" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
 
-# --- PART 1: Add assistantEntryId state variable after pendingState creation ---
-old_state = '''  const originalAppend = sessionManager.appendMessage.bind(sessionManager);
-  const pendingState = createPendingToolCallState();'''
+# Part 1: Add assistantEntryId variable after pendingState creation
+old_pending = '''  const originalAppend = sessionManager.appendMessage.bind(sessionManager);
+  const pendingState = createPendingToolCallState();
+  const persistMessage = (message: AgentMessage) => {'''
 
-new_state = '''  const originalAppend = sessionManager.appendMessage.bind(sessionManager);
-  // Map from toolCallId -> toolName (for pending tool calls)
+new_pending = '''  const originalAppend = sessionManager.appendMessage.bind(sessionManager);
   const pendingState = createPendingToolCallState();
   // The entry ID of the assistant message that has pending tool calls.
   // All tool results for this assistant message should have this ID as their parentId.
-  let assistantEntryId: string | null = null;'''
+  let assistantEntryId: string | null = null;
+  const persistMessage = (message: AgentMessage) => {'''
 
-if old_state not in content:
-    print(f"FAIL #31909 part 1: could not find originalAppend + pendingState block in {filepath}")
+if old_pending not in content:
+    print("    FAIL: #31909 cannot find pendingState creation block", file=sys.stderr)
     sys.exit(1)
 
-content = content.replace(old_state, new_state, 1)
+content = content.replace(old_pending, new_pending, 1)
 
-# --- PART 2: Add branch() call in flushPendingToolResults before each synthetic append ---
-old_flush = '''      for (const [id, name] of pendingState.entries()) {
+# Part 2: In flushPendingToolResults, branch to assistant before each synthetic result
+old_flush = '''    if (allowSyntheticToolResults) {
+      for (const [id, name] of pendingState.entries()) {
         const synthetic = makeMissingToolResult({ toolCallId: id, toolName: name });
         const flushed = applyBeforeWriteHook('''
 
-new_flush = '''      for (const [id, name] of pendingState.entries()) {
+new_flush = '''    if (allowSyntheticToolResults) {
+      for (const [id, name] of pendingState.entries()) {
         const synthetic = makeMissingToolResult({ toolCallId: id, toolName: name });
         // Branch to assistant message before appending each synthetic tool result
         // so they all have the assistant as their parent
@@ -62,74 +64,74 @@ new_flush = '''      for (const [id, name] of pendingState.entries()) {
         const flushed = applyBeforeWriteHook('''
 
 if old_flush not in content:
-    print(f"FAIL #31909 part 2: could not find flush loop in {filepath}")
+    print("    FAIL: #31909 cannot find flushPendingToolResults synthetic block", file=sys.stderr)
     sys.exit(1)
 
 content = content.replace(old_flush, new_flush, 1)
 
-# --- PART 3: Clear assistantEntryId after pendingState.clear() in flushPendingToolResults ---
+# Part 3: Clear assistantEntryId after flush
 old_clear = '''    pendingState.clear();
-  };'''
+  };
+
+  const clearPendingToolResults = () => {'''
 
 new_clear = '''    pendingState.clear();
     assistantEntryId = null;
-  };'''
+  };
+
+  const clearPendingToolResults = () => {'''
 
 if old_clear not in content:
-    print(f"FAIL #31909 part 3: could not find pendingState.clear() in {filepath}")
+    print("    FAIL: #31909 cannot find pendingState.clear() in flush", file=sys.stderr)
     sys.exit(1)
 
 content = content.replace(old_clear, new_clear, 1)
 
-# --- PART 4: Add branch() call before append in toolResult handling ---
-# v2026.3.2 uses originalAppend, v2026.3.8+ may use safeAppend
-old_append_original = '''      if (!persisted) {
+# Part 4: In guardedAppend toolResult section, branch to assistant before append
+# Handle both pre-#38320 and post-#38320 layout
+old_append_pre = '''      if (!persisted) {
         return undefined;
       }
       return originalAppend(persisted as never);
-    }'''
+    }
 
-old_append_safe = '''      if (!persisted) {
+    // Skip tool call extraction for aborted/errored assistant messages.'''
+
+old_append_post = '''      if (!persisted) {
         return undefined;
       }
-      return safeAppend(persisted as never);
-    }'''
+      return originalAppend(persisted as never);
+    }
 
-if old_append_original in content:
-    append_fn = 'originalAppend'
-    old_append = old_append_original
-elif old_append_safe in content:
-    append_fn = 'safeAppend'
-    old_append = old_append_safe
-else:
-    print(f"FAIL #31909 part 4: could not find toolResult append block (tried originalAppend and safeAppend) in {filepath}")
-    sys.exit(1)
+    const toolCalls ='''
 
-new_append = f'''      if (!persisted) {{
+branch_insert = '''      if (!persisted) {
         return undefined;
-      }}
+      }
       // FIX: Branch to assistant message before appending tool result.
       // This ensures all tool results from the same assistant message have
       // the assistant message as their parent, not the previous tool result.
-      if (assistantEntryId) {{
+      if (assistantEntryId) {
         sessionManager.branch(assistantEntryId);
-      }}
-      const result = {append_fn}(persisted as never);
+      }
+      const result = originalAppend(persisted as never);
       // Clear assistant entry ID when all pending tool results are done
-      if (pendingState.size() === 0) {{
+      if (pendingState.size() === 0) {
         assistantEntryId = null;
-      }}
+      }
       return result;
-    }}'''
+    }
+'''
 
-content = content.replace(old_append, new_append, 1)
-print(f"OK #31909 part 4: patched {append_fn} with branch() call")
+if old_append_pre in content:
+    content = content.replace(old_append_pre, branch_insert + '\n    // Skip tool call extraction for aborted/errored assistant messages.', 1)
+elif old_append_post in content:
+    content = content.replace(old_append_post, branch_insert + '\n    const toolCalls =', 1)
+else:
+    print("    FAIL: #31909 cannot find toolResult originalAppend block", file=sys.stderr)
+    sys.exit(1)
 
-# --- PART 5: Store assistantEntryId when tool calls are tracked ---
-# v2026.3.2 has:
-#     if (toolCalls.length > 0) {
-#       pendingState.trackToolCalls(toolCalls);
-#     }
+# Part 5: Store assistantEntryId when tracking tool calls
 old_track = '''    if (toolCalls.length > 0) {
       pendingState.trackToolCalls(toolCalls);
     }'''
@@ -141,13 +143,14 @@ new_track = '''    if (toolCalls.length > 0) {
     }'''
 
 if old_track not in content:
-    print(f"FAIL #31909 part 5: could not find toolCalls tracking block in {filepath}")
+    print("    FAIL: #31909 cannot find trackToolCalls block", file=sys.stderr)
     sys.exit(1)
 
 content = content.replace(old_track, new_track, 1)
 
-with open(filepath, 'w') as f:
+with open(path, 'w') as f:
     f.write(content)
-
-print(f"OK #31909: added parallel tool result parentId fix to {filepath}")
+print("    OK: #31909 session-tool-result-guard.ts — assistantEntryId + branch()")
 PYEOF
+
+echo "    OK: #31909 parallel tool results parentId fix applied"

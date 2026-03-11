@@ -1,34 +1,32 @@
 #!/usr/bin/env bash
+# PR #25169 — fix: drop toolResult with empty/blank call_id to prevent session corruption
+# 2 files: tool-call-id.ts, session-tool-result-guard.ts
+#
+# Changes:
+# 1. tool-call-id.ts: extractToolResultId gets readId helper that trims and rejects blank
+# 2. session-tool-result-guard.ts: early return undefined for missing/blank toolCallId
 set -euo pipefail
-cd "$1"
+SRC="${1:-.}/src"
 
-# PR #25169 — Drop toolResult with empty/blank call_id
-# Two changes:
-# 1. tool-call-id.ts: extractToolResultId() now trims and rejects blank strings
-# 2. session-tool-result-guard.ts: Early return for missing/blank toolCallId in guardedAppend
+TOOL_ID="$SRC/agents/tool-call-id.ts"
+GUARD="$SRC/agents/session-tool-result-guard.ts"
 
-FILE_TOOLID="src/agents/tool-call-id.ts"
-FILE_GUARD="src/agents/session-tool-result-guard.ts"
-
-if [[ ! -f "$FILE_TOOLID" ]]; then
-  echo "SKIP #25169: $FILE_TOOLID not found"
-  exit 0
-fi
-if [[ ! -f "$FILE_GUARD" ]]; then
-  echo "SKIP #25169: $FILE_GUARD not found"
+# ── Idempotency ──
+if grep -q 'const readId' "$TOOL_ID" 2>/dev/null; then
+  echo "    SKIP: #25169 already applied"
   exit 0
 fi
 
-# Idempotency
-if grep -q 'const readId' "$FILE_TOOLID" 2>/dev/null || grep -q 'trimmed\.length > 0' "$FILE_TOOLID" 2>/dev/null; then
-  echo "SKIP #25169 tool-call-id: already patched"
-else
-  # --- PART 1: tool-call-id.ts — rewrite extractToolResultId to trim/reject blank ---
-  python3 - "$FILE_TOOLID" << 'PYEOF'
+# ── File checks ──
+[ -f "$TOOL_ID" ] || { echo "    FAIL: #25169 $TOOL_ID not found"; exit 1; }
+[ -f "$GUARD" ] || { echo "    FAIL: #25169 $GUARD not found"; exit 1; }
+
+# ── 1. Rewrite extractToolResultId with readId helper ──
+python3 - "$TOOL_ID" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
 
 old = '''export function extractToolResultId(
@@ -68,38 +66,23 @@ new = '''export function extractToolResultId(
 }'''
 
 if old not in content:
-    print(f"FAIL #25169 tool-call-id: could not find extractToolResultId function in {filepath}")
+    print("    FAIL: #25169 cannot find extractToolResultId function", file=sys.stderr)
     sys.exit(1)
 
 content = content.replace(old, new, 1)
 
-with open(filepath, 'w') as f:
+with open(path, 'w') as f:
     f.write(content)
-
-print(f"OK #25169 part 1: patched extractToolResultId in {filepath}")
+print("    OK: #25169 tool-call-id.ts — readId with trim/reject")
 PYEOF
-fi
 
-# --- PART 2: session-tool-result-guard.ts — drop toolResult with missing id ---
-if grep -q 'Drop malformed tool results' "$FILE_GUARD" 2>/dev/null; then
-  echo "SKIP #25169 guard: already patched"
-  exit 0
-fi
-
-python3 - "$FILE_GUARD" << 'PYEOF'
+# ── 2. Add blank callId guard to session-tool-result-guard.ts ──
+python3 - "$GUARD" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
-
-# v2026.3.2 has:
-#     if (nextRole === "toolResult") {
-#       const id = extractToolResultId(nextMessage as Extract<AgentMessage, { role: "toolResult" }>);
-#       const toolName = id ? pendingState.getToolName(id) : undefined;
-#       if (id) {
-#         pendingState.delete(id);
-#       }
 
 old = '''    if (nextRole === "toolResult") {
       const id = extractToolResultId(nextMessage as Extract<AgentMessage, { role: "toolResult" }>);
@@ -119,13 +102,14 @@ new = '''    if (nextRole === "toolResult") {
       pendingState.delete(id);'''
 
 if old not in content:
-    print(f"FAIL #25169 guard: could not find toolResult handling block in {filepath}")
+    print("    FAIL: #25169 cannot find toolResult handling block in guard", file=sys.stderr)
     sys.exit(1)
 
 content = content.replace(old, new, 1)
 
-with open(filepath, 'w') as f:
+with open(path, 'w') as f:
     f.write(content)
-
-print(f"OK #25169 part 2: added empty toolCallId guard in {filepath}")
+print("    OK: #25169 session-tool-result-guard.ts — blank callId guard")
 PYEOF
+
+echo "    OK: #25169 blank call_id drop applied"

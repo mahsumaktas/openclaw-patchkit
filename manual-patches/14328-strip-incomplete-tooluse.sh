@@ -1,96 +1,68 @@
 #!/usr/bin/env bash
+# PR #14328 — fix: strip incomplete tool_use blocks to prevent 400 loops
+# 3 files: session-transcript-repair.ts, pi-embedded-helpers/errors.ts, (tests skipped)
+#
+# Changes:
+# 1. hasToolCallInput: add partialJson check (blocks with partialJson=true are incomplete)
+# 2. repairToolUseResultPairing: strip tool_use blocks from errored/aborted messages
+#    (keep text content, drop entire message if only tool_use blocks)
+# 3. errors.ts: add isCorruptedToolUsePairingError + formatAssistantErrorText handler
 set -euo pipefail
-cd "$1"
+SRC="${1:-.}/src"
 
-# PR #14328 — Strip incomplete tool_use blocks from errored/aborted assistant messages
-# Two files:
-# 1. session-transcript-repair.ts:
-#    a. hasToolCallInput: reject blocks with partialJson: true
-#    b. repairToolUseResultPairing: strip tool_use from error/aborted messages (keep text)
-# 2. pi-embedded-helpers/errors.ts:
-#    a. Add isCorruptedToolUsePairingError() detection
-#    b. Add friendly error message for corrupted tool_use/tool_result pair
+REPAIR="$SRC/agents/session-transcript-repair.ts"
+ERRORS="$SRC/agents/pi-embedded-helpers/errors.ts"
 
-FILE_REPAIR="src/agents/session-transcript-repair.ts"
-FILE_ERRORS="src/agents/pi-embedded-helpers/errors.ts"
-
-if [[ ! -f "$FILE_REPAIR" ]]; then
-  echo "SKIP #14328: $FILE_REPAIR not found"
-  exit 0
-fi
-if [[ ! -f "$FILE_ERRORS" ]]; then
-  echo "SKIP #14328: $FILE_ERRORS not found"
+# ── Idempotency ──
+if grep -q '"partialJson" in block' "$REPAIR" 2>/dev/null; then
+  echo "    SKIP: #14328 already applied"
   exit 0
 fi
 
-# Idempotency — check for ACTUAL code changes, not just comments containing keywords
-if grep -q '"partialJson" in block' "$FILE_REPAIR" 2>/dev/null && grep -q 'isCorruptedToolUsePairingError' "$FILE_ERRORS" 2>/dev/null; then
-  echo "SKIP #14328: already patched"
-  exit 0
-fi
+# ── File checks ──
+[ -f "$REPAIR" ] || { echo "    FAIL: #14328 $REPAIR not found"; exit 1; }
+[ -f "$ERRORS" ] || { echo "    FAIL: #14328 $ERRORS not found"; exit 1; }
 
-# --- PART 1: session-transcript-repair.ts — hasToolCallInput rejects partialJson ---
-python3 - "$FILE_REPAIR" << 'PYEOF'
+# ── 1. Add partialJson check to hasToolCallInput ──
+python3 - "$REPAIR" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
 
-changed = False
+# Part 1a: Add partialJson check to hasToolCallInput
+old_input = '''function hasToolCallInput(block: RawToolCallBlock): boolean {
+  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;'''
 
-# 1a. Add partialJson check to hasToolCallInput
-if '"partialJson" in block' not in content:
-    old_input = '''function hasToolCallInput(block: RawToolCallBlock): boolean {
-  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;
-  const hasArguments =
-    "arguments" in block ? block.arguments !== undefined && block.arguments !== null : false;
-  return hasInput || hasArguments;
-}'''
-
-    new_input = '''function hasToolCallInput(block: RawToolCallBlock): boolean {
+new_input = '''function hasToolCallInput(block: RawToolCallBlock): boolean {
   // Blocks flagged as partial (interrupted mid-stream) are never complete.
   if ("partialJson" in block && (block as { partialJson?: unknown }).partialJson === true) {
     return false;
   }
-  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;
-  const hasArguments =
-    "arguments" in block ? block.arguments !== undefined && block.arguments !== null : false;
-  return hasInput || hasArguments;
-}'''
+  const hasInput = "input" in block ? block.input !== undefined && block.input !== null : false;'''
 
-    if old_input not in content:
-        print(f"FAIL #14328 part 1a: could not find hasToolCallInput function in {filepath}")
-        sys.exit(1)
+if old_input not in content:
+    print("    FAIL: #14328 cannot find hasToolCallInput function", file=sys.stderr)
+    sys.exit(1)
 
-    content = content.replace(old_input, new_input, 1)
-    changed = True
-    print(f"OK #14328 part 1a: added partialJson check to hasToolCallInput")
-else:
-    print(f"SKIP #14328 part 1a: partialJson code check already present")
+content = content.replace(old_input, new_input, 1)
 
-# 1b. Replace error/aborted handling in repairToolUseResultPairing
-# Strip tool_use blocks, keep text content
-# Upstream detection: if assistant.content.length === 0 check already exists near
-# stopReason === "aborted", the fix has been merged upstream — skip part 1b.
-if 'nonToolContent' not in content:
-    import re
-    upstream_pattern = r'stopReason === "aborted"[\s\S]{0,300}assistant\.content\.length === 0'
-    if re.search(upstream_pattern, content):
-        print(f"OK #14328 part 1b: already upstream (content filtering for error/aborted)")
-    else:
-        old_errored = '''    const stopReason = (assistant as { stopReason?: string }).stopReason;
+# Part 1b: In repairToolUseResultPairing, replace the stopReason block that just pushes msg
+# with one that strips tool_use blocks and keeps text content.
+# If #38320 is already applied, the stopReason block is replaced with structural checks
+# and this step is no longer needed (the partialJson check in hasToolCallInput is sufficient).
+old_stop = '''    const stopReason = (assistant as { stopReason?: string }).stopReason;
     if (stopReason === "error" || stopReason === "aborted") {
       out.push(msg);
       continue;
     }'''
 
-        new_errored = '''    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
+new_stop = '''    // When stopReason is "error" or "aborted", the tool_use blocks may be incomplete
     // (e.g., partialJson: true). Leaving them in the transcript causes permanent 400
     // errors from the Anthropic API ("unexpected tool_use_id found in tool_result blocks")
     // because the incomplete tool_use has no matching tool_result.
     // Strip tool_use blocks entirely; keep any text/thinking content.
-    // See: https://github.com/openclaw/openclaw/issues/4597
     // See: https://github.com/openclaw/openclaw/issues/14322
     const stopReason = (assistant as { stopReason?: string }).stopReason;
     if (stopReason === "error" || stopReason === "aborted") {
@@ -100,7 +72,7 @@ if 'nonToolContent' not in content:
           out.push({ ...msg, content: nonToolContent } as AgentMessage);
           changed = true;
         } else {
-          // Entire message was tool_use blocks with no text \u2014 drop it.
+          // Entire message was tool_use blocks with no text — drop it.
           changed = true;
         }
       } else {
@@ -109,114 +81,93 @@ if 'nonToolContent' not in content:
       continue;
     }'''
 
-        if old_errored not in content:
-            # Try alternate pattern — maybe already partially modified or comments differ
-            # Look for the core pattern
-            pattern = r'(    const stopReason = \(assistant as \{ stopReason\?: string \}\)\.stopReason;\s*\n\s*if \(stopReason === "error" \|\| stopReason === "aborted"\) \{\s*\n\s*)out\.push\(msg\);\s*\n\s*continue;\s*\n\s*\}'
-            match = re.search(pattern, content)
-            if match:
-                replacement = match.group(1) + '''if (Array.isArray(assistant.content)) {
-        const nonToolContent = assistant.content.filter((block) => !isRawToolCallBlock(block));
-        if (nonToolContent.length > 0) {
-          out.push({ ...msg, content: nonToolContent } as AgentMessage);
-          changed = true;
-        } else {
-          // Entire message was tool_use blocks with no text \u2014 drop it.
-          changed = true;
-        }
-      } else {
-        out.push(msg);
-      }
-      continue;
-    }'''
-                content = content[:match.start()] + replacement + content[match.end():]
-                changed = True
-                print(f"OK #14328 part 1b: patched error/aborted handling (regex)")
-            else:
-                print(f"FAIL #14328 part 1b: could not find error/aborted handling in {filepath}")
-                sys.exit(1)
-        else:
-            content = content.replace(old_errored, new_errored, 1)
-            changed = True
-            print(f"OK #14328 part 1b: patched error/aborted handling")
+if old_stop in content:
+    content = content.replace(old_stop, new_stop, 1)
+    print("    OK: #14328 part 1b: stopReason block replaced with tool_use stripping")
+elif 'extractRepairableToolCallsFromAssistant' in content:
+    # #38320 already applied — the stopReason block is gone, structural checks handle it.
+    # The partialJson check in hasToolCallInput (part 1a) is still the key fix here.
+    print("    SKIP: #14328 part 1b: #38320 already replaced stopReason block with structural checks")
 else:
-    print(f"SKIP #14328 part 1b: nonToolContent filter already present")
+    print("    FAIL: #14328 cannot find stopReason block in repairToolUseResultPairing", file=sys.stderr)
+    sys.exit(1)
 
-if changed:
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-print(f"OK #14328 part 1: session-transcript-repair.ts done")
+with open(path, 'w') as f:
+    f.write(content)
+print("    OK: #14328 session-transcript-repair.ts — partialJson check + tool_use stripping")
 PYEOF
 
-# --- PART 2: pi-embedded-helpers/errors.ts ---
-python3 - "$FILE_ERRORS" << 'PYEOF'
+# ── 2. Add isCorruptedToolUsePairingError to errors.ts ──
+python3 - "$ERRORS" << 'PYEOF'
 import sys
 
-filepath = sys.argv[1]
-with open(filepath, 'r') as f:
+path = sys.argv[1]
+with open(path, 'r') as f:
     content = f.read()
 
-changed = False
+# Part 2a: Add isCorruptedToolUsePairingError function after isMissingToolCallInputError
+old_missing = '''export function isMissingToolCallInputError(raw: string): boolean {
+  if (!raw) {
+    return false;
+  }
+  return TOOL_CALL_INPUT_MISSING_RE.test(raw) || TOOL_CALL_INPUT_PATH_RE.test(raw);
+}'''
 
-# 2a. Add isCorruptedToolUsePairingError function before isBillingAssistantError
-if 'isCorruptedToolUsePairingError' not in content:
-    old_billing = 'export function isBillingAssistantError'
+new_missing = '''export function isMissingToolCallInputError(raw: string): boolean {
+  if (!raw) {
+    return false;
+  }
+  return TOOL_CALL_INPUT_MISSING_RE.test(raw) || TOOL_CALL_INPUT_PATH_RE.test(raw);
+}
 
-    new_fn = '''const CORRUPTED_TOOL_USE_PAIRING_RE = /unexpected tool_use_id found in tool_result blocks/i;
+const CORRUPTED_TOOL_USE_PAIRING_RE = /unexpected tool_use_id found in tool_result blocks/i;
 
 export function isCorruptedToolUsePairingError(raw: string): boolean {
   if (!raw) {
     return false;
   }
   return CORRUPTED_TOOL_USE_PAIRING_RE.test(raw);
-}
+}'''
 
-export function isBillingAssistantError'''
+if old_missing not in content:
+    print("    FAIL: #14328 cannot find isMissingToolCallInputError", file=sys.stderr)
+    sys.exit(1)
 
-    if old_billing not in content:
-        print(f"FAIL #14328 part 2a: could not find isBillingAssistantError in {filepath}")
-        sys.exit(1)
+content = content.replace(old_missing, new_missing, 1)
 
-    content = content.replace(old_billing, new_fn, 1)
-    changed = True
-    print(f"OK #14328 part 2a: added isCorruptedToolUsePairingError function")
-else:
-    print(f"SKIP #14328 part 2a: isCorruptedToolUsePairingError already present")
-
-# 2b. Add friendly error message in formatAssistantErrorText
-# Insert before the invalidRequest check
-if 'isCorruptedToolUsePairingError(raw)' not in content or 'corrupted tool call pair' not in content:
-    old_invalid = '''  const invalidRequest = raw.match(/"type":"invalid_request_error".*?"message":"([^"]+)"/);
-  if (invalidRequest?.[1]) {
-    return `LLM request rejected: ${invalidRequest[1]}`;
+# Part 2b: Add corrupted tool use pairing error handler in formatAssistantErrorText
+old_fmt = '''  if (isMissingToolCallInputError(raw)) {
+    return (
+      "Session history looks corrupted (tool call input missing). " +
+      "Use /new to start a fresh session. " +
+      "If this keeps happening, reset the session or delete the corrupted session transcript."
+    );
   }'''
 
-    new_invalid = '''  if (isCorruptedToolUsePairingError(raw)) {
+new_fmt = '''  if (isMissingToolCallInputError(raw)) {
+    return (
+      "Session history looks corrupted (tool call input missing). " +
+      "Use /new to start a fresh session. " +
+      "If this keeps happening, reset the session or delete the corrupted session transcript."
+    );
+  }
+
+  if (isCorruptedToolUsePairingError(raw)) {
     return (
       "Session history contains a corrupted tool call pair (likely from an interrupted response). " +
       "Use /new to start a fresh session."
     );
-  }
-
-  const invalidRequest = raw.match(/"type":"invalid_request_error".*?"message":"([^"]+)"/);
-  if (invalidRequest?.[1]) {
-    return `LLM request rejected: ${invalidRequest[1]}`;
   }'''
 
-    if old_invalid not in content:
-        print(f"FAIL #14328 part 2b: could not find invalidRequest block in {filepath}")
-        sys.exit(1)
+if old_fmt not in content:
+    print("    FAIL: #14328 cannot find isMissingToolCallInputError handler in formatAssistantErrorText", file=sys.stderr)
+    sys.exit(1)
 
-    content = content.replace(old_invalid, new_invalid, 1)
-    changed = True
-    print(f"OK #14328 part 2b: added corrupted tool_use error message")
-else:
-    print(f"SKIP #14328 part 2b: corrupted tool_use error message already present")
+content = content.replace(old_fmt, new_fmt, 1)
 
-if changed:
-    with open(filepath, 'w') as f:
-        f.write(content)
-
-print(f"OK #14328 part 2: errors.ts done")
+with open(path, 'w') as f:
+    f.write(content)
+print("    OK: #14328 errors.ts — isCorruptedToolUsePairingError added")
 PYEOF
+
+echo "    OK: #14328 strip incomplete tool_use applied"
