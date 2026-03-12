@@ -650,7 +650,12 @@ if [ -d "$PATCHKIT_DIR/.git" ]; then
 ${PATCH_COUNT} active patches, ${SCORED_COUNT} PRs scored total
 $CHANGES" --no-verify 2>/dev/null
 
-    git push origin main 2>/dev/null && echo "  Pushed to GitHub" || echo "  Push failed"
+    # Use GH_TOKEN via temp credential store (avoids token in process list)
+    _CRED_FILE=$(mktemp) && chmod 600 "$_CRED_FILE"
+    echo "https://x-access-token:${GH_TOKEN}@github.com" > "$_CRED_FILE"
+    git -c "credential.helper=store --file=$_CRED_FILE" push origin main 2>/dev/null \
+      && echo "  Pushed to GitHub" || echo "  Push failed"
+    rm -f "$_CRED_FILE"
   else
     echo "  No changes to commit"
   fi
