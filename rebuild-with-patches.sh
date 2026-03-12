@@ -219,11 +219,18 @@ for pr_num in "${OPEN_PRS[@]}"; do
     git apply --exclude='CHANGELOG.md' --exclude='*.test.*' --exclude='*.e2e.*' --exclude='*.live.*' "/tmp/oc-pr-diffs/${pr_num}.diff"
     [ "$VERBOSE" = true ] && ok "#$pr_num applied (changelog+tests excluded)"
     APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[3]=$((STRATEGY_COUNTS[3] + 1))
-  # Strategy 3: 3-way merge
+  # Strategy 3: 3-way merge (may produce conflicts — handle gracefully)
   elif git apply --check --3way "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
-    git apply --3way "/tmp/oc-pr-diffs/${pr_num}.diff"
-    [ "$VERBOSE" = true ] && ok "#$pr_num applied with 3way merge"
-    APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[4]=$((STRATEGY_COUNTS[4] + 1))
+    if git apply --3way "/tmp/oc-pr-diffs/${pr_num}.diff" 2>/dev/null; then
+      [ "$VERBOSE" = true ] && ok "#$pr_num applied with 3way merge"
+      APPLIED=$((APPLIED + 1)); STRATEGY_COUNTS[4]=$((STRATEGY_COUNTS[4] + 1))
+    else
+      # 3way produced conflicts — resolve by checking out ours and skipping
+      git checkout -- . 2>/dev/null || true
+      warn "#$pr_num 3way merge had conflicts — skipped"
+      FAILED=$((FAILED + 1))
+      FAILED_LIST+=("$pr_num")
+    fi
   else
     warn "#$pr_num failed to apply (no matching strategy)"
     FAILED=$((FAILED + 1))
