@@ -131,8 +131,13 @@ old_a = 'JSON.stringify({ providers: mergedProviders }, null, 2)'
 new_a = 'JSON.stringify({ providers: redactResolvedSecrets(mergedProviders) }, null, 2)'
 
 # Pre-refactor pattern: JSON.stringify({ providers: normalizedProviders }, null, 2)
+# NOTE: normalizeProviders() returns ModelsConfig["providers"] which is
+# Record<string, ModelProviderConfig> | undefined.  Guard with ?? {} so that
+# redactResolvedSecrets() always receives the non-nullable overload, fixing
+# TS2345: Argument of type '... | undefined' is not assignable to parameter
+# of type 'Record<string, ModelProviderConfig>'.
 old_b = 'JSON.stringify({ providers: normalizedProviders }, null, 2)'
-new_b = 'JSON.stringify({ providers: redactResolvedSecrets(normalizedProviders) }, null, 2)'
+new_b = 'JSON.stringify({ providers: redactResolvedSecrets(normalizedProviders ?? {}) }, null, 2)'
 
 if old_a in content:
     content = content.replace(old_a, new_a, 1)
