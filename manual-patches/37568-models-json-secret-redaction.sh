@@ -6,8 +6,9 @@ set -euo pipefail
 # Preserves env var names (UPPER_SNAKE_CASE) and markers (ollama-local, aws-sdk),
 # strips actual resolved API keys (sk-..., xai-..., mixed-case tokens).
 #
-# NOTE: v2026.3.8 refactored models-config — the plan logic moved from
-# models-config.ts to models-config.plan.ts. This script targets the plan file.
+# v2026.3.13 update: the plan function now uses `secretEnforcedProviders`
+# (from enforceSourceManagedProviderSecrets) instead of `mergedProviders`.
+# The script targets all known variable names across versions.
 
 SRC="${1:-.}/src"
 
@@ -35,60 +36,65 @@ fi
 # ── Apply patch ──
 python3 - "$TARGET" << 'PYEOF'
 import sys
+import re
 
 path = sys.argv[1]
 with open(path, 'r') as f:
     content = f.read()
 
-# ── 1. Add helper functions ──
-# Find insertion point: after the ModelsConfig type alias
-anchor = 'type ModelsConfig = NonNullable<OpenClawConfig["models"]>;'
-if anchor not in content:
-    anchor = "type ModelsConfig = NonNullable<OpenClawConfig['models']>;"
-if anchor not in content:
-    # Try to find any type ModelsConfig line
-    import re
-    m = re.search(r'type ModelsConfig\s*=\s*[^;]+;', content)
+# ── 1. Find insertion point for helper functions ──
+# Try multiple anchors in order of preference:
+# a) ModelsConfig type alias (v2026.3.8+)
+# b) ModelsJsonPlan type (v2026.3.8+)
+# c) planOpenClawModelsJson function (universal fallback)
+insert_point = None
+
+# Try type alias first
+for anchor_pattern in [
+    r'type\s+ModelsConfig\s*=\s*[^;]+;',
+    r'type\s+ModelsJsonPlan\s*=\s*\{[^}]*\}\s*\|\s*\{[^}]*\}\s*\|\s*\{[^}]*\};',
+]:
+    m = re.search(anchor_pattern, content, re.DOTALL)
     if m:
-        anchor = m.group(0)
+        # Insert after this declaration
+        end = m.end()
+        nl = content.find('\n', end)
+        insert_point = nl + 1 if nl != -1 else end
+        break
 
-if anchor not in content:
-    print("    FAIL: cannot find ModelsConfig type alias in " + path)
+# Fallback: insert just before planOpenClawModelsJson
+if insert_point is None:
+    m = re.search(r'(?:export\s+)?(?:async\s+)?function\s+planOpenClawModelsJson', content)
+    if m:
+        insert_point = m.start()
+
+if insert_point is None:
+    print("    FAIL: cannot find insertion anchor in " + path)
     sys.exit(1)
-
-idx = content.index(anchor)
-insert_point = content.index('\n', idx) + 1
 
 new_functions = '''
 /**
- * Check if a string looks like an environment variable name rather than a
- * resolved secret value. Env var names are UPPER_SNAKE_CASE. Resolved secrets
- * are typically longer and contain mixed-case alphanumeric characters, dashes,
- * underscores in non-UPPER_SNAKE_CASE patterns.
+ * Check if a string looks like an environment variable name or a known
+ * synthetic marker rather than a resolved secret value.
+ * Env var names are UPPER_SNAKE_CASE. Resolved secrets are typically longer
+ * mixed-case alphanumeric strings (sk-..., xai-..., etc.).
  *
- * Special cases:
- * - "ollama-local" and similar synthetic markers are preserved
- * - "aws-sdk" auth mode markers are preserved
+ * Special cases preserved:
+ * - "ollama-local" and similar synthetic markers
+ * - "aws-sdk" auth mode markers
  */
 function isEnvVarNameOrMarker(value: string): boolean {
   const trimmed = value.trim();
-  if (!trimmed) {
-    return false;
-  }
+  if (!trimmed) return false;
 
-  // Synthetic local provider markers (e.g., "ollama-local")
-  if (trimmed === "ollama-local") {
-    return true;
-  }
+  // Synthetic local provider markers
+  if (trimmed === "ollama-local") return true;
 
   // AWS SDK auth marker
-  if (trimmed === "aws-sdk") {
-    return true;
-  }
+  if (trimmed === "aws-sdk") return true;
 
   // Environment variable name pattern: UPPER_SNAKE_CASE
   // Must start with letter, contain only uppercase letters, digits, underscores
-  // Examples: OPENAI_API_KEY, ANTHROPIC_API_KEY, AWS_ACCESS_KEY_ID
   return /^[A-Z][A-Z0-9_]*$/.test(trimmed);
 }
 
@@ -98,14 +104,18 @@ function isEnvVarNameOrMarker(value: string): boolean {
  * actual resolved API keys to prevent plaintext secrets in models.json.
  */
 function redactResolvedSecrets(
-  providers: Record<string, ProviderConfig>,
-): Record<string, ProviderConfig> {
-  const redacted: Record<string, ProviderConfig> = {};
+  providers: NonNullable<Record<string, any>>,
+): Record<string, any> {
+  const redacted: Record<string, any> = {};
 
   for (const [key, provider] of Object.entries(providers)) {
+    if (!provider || typeof provider !== "object") {
+      redacted[key] = provider;
+      continue;
+    }
     const { apiKey, ...rest } = provider;
 
-    // If apiKey is undefined or empty, or looks like an env var name/marker, preserve it
+    // If apiKey is undefined/empty or looks like an env var name/marker, keep it
     if (
       apiKey === undefined ||
       apiKey === "" ||
@@ -113,8 +123,8 @@ function redactResolvedSecrets(
     ) {
       redacted[key] = provider;
     } else {
-      // apiKey looks like a resolved secret - strip it
-      redacted[key] = rest as ProviderConfig;
+      // apiKey looks like a resolved secret — strip it
+      redacted[key] = rest;
     }
   }
 
@@ -126,25 +136,44 @@ function redactResolvedSecrets(
 content = content[:insert_point] + new_functions + content[insert_point:]
 
 # ── 2. Wire redactResolvedSecrets into the serialization ──
-# v2026.3.8 pattern (plan file): JSON.stringify({ providers: mergedProviders }, null, 2)
-old_a = 'JSON.stringify({ providers: mergedProviders }, null, 2)'
-new_a = 'JSON.stringify({ providers: redactResolvedSecrets(mergedProviders) }, null, 2)'
+# Try all known variable name patterns across OpenClaw versions:
+#   v2026.3.13+: secretEnforcedProviders (after enforceSourceManagedProviderSecrets)
+#   v2026.3.8-3.12: mergedProviders (after resolveProvidersForMode)
+#   pre-3.8: normalizedProviders (after normalizeProviders)
+replacements = [
+    ('JSON.stringify({ providers: secretEnforcedProviders }',
+     'JSON.stringify({ providers: redactResolvedSecrets(secretEnforcedProviders) }'),
+    ('JSON.stringify({ providers: mergedProviders }',
+     'JSON.stringify({ providers: redactResolvedSecrets(mergedProviders) }'),
+    ('JSON.stringify({ providers: normalizedProviders }',
+     'JSON.stringify({ providers: redactResolvedSecrets(normalizedProviders) }'),
+]
 
-# Pre-refactor pattern: JSON.stringify({ providers: normalizedProviders }, null, 2)
-# NOTE: normalizeProviders() returns ModelsConfig["providers"] which is
-# Record<string, ModelProviderConfig> | undefined.  Guard with ?? {} so that
-# redactResolvedSecrets() always receives the non-nullable overload, fixing
-# TS2345: Argument of type '... | undefined' is not assignable to parameter
-# of type 'Record<string, ModelProviderConfig>'.
-old_b = 'JSON.stringify({ providers: normalizedProviders }, null, 2)'
-new_b = 'JSON.stringify({ providers: redactResolvedSecrets(normalizedProviders ?? {}) }, null, 2)'
+applied = False
+for old, new in replacements:
+    if old in content:
+        content = content.replace(old, new, 1)
+        applied = True
+        break
 
-if old_a in content:
-    content = content.replace(old_a, new_a, 1)
-elif old_b in content:
-    content = content.replace(old_b, new_b, 1)
-else:
-    print("    FAIL: cannot find JSON.stringify providers line")
+if not applied:
+    # Last resort: regex match for any JSON.stringify({ providers: <identifier> }
+    m = re.search(
+        r'JSON\.stringify\(\{\s*providers:\s*(\w+)\s*\}',
+        content
+    )
+    if m:
+        var_name = m.group(1)
+        old_str = m.group(0)
+        new_str = old_str.replace(
+            f'providers: {var_name}',
+            f'providers: redactResolvedSecrets({var_name})'
+        )
+        content = content.replace(old_str, new_str, 1)
+        applied = True
+
+if not applied:
+    print("    FAIL: cannot find JSON.stringify providers line in " + path)
     sys.exit(1)
 
 with open(path, 'w') as f:

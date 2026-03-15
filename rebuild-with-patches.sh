@@ -19,9 +19,12 @@ else
   OPENCLAW_ROOT="$(npm root -g)/openclaw"
 fi
 VERSION=$(node -e "console.log(require('$OPENCLAW_ROOT/package.json').version)")
-BASE_TAG="v$(echo "$VERSION" | sed 's/-[0-9]*$//')"
 WORKDIR="/tmp/openclaw-patch-build-$$"
 REPO="https://github.com/openclaw/openclaw.git"
+_BASE="v$(echo "$VERSION" | sed 's/-[0-9]*$//')"
+# Resolve git tag: try exact match first, then -1 suffix (npm strips trailing -N from git tags)
+_EXACT_TAG=$(git ls-remote --tags "$REPO" "refs/tags/${_BASE}" "refs/tags/${_BASE}-1" 2>/dev/null | sed 's|.*refs/tags/||' | grep -v '\^' | sort -V | tail -1 || true)
+BASE_TAG="${_EXACT_TAG:-$_BASE}"
 
 # Handle flags
 VERBOSE=false
@@ -142,7 +145,7 @@ fi
 echo ""
 info "Cloning openclaw at $BASE_TAG..."
 rm -rf "$WORKDIR"
-git clone --depth 200 --branch "$BASE_TAG" "$REPO" "$WORKDIR" 2>/dev/null
+git clone --depth 1 --branch "$BASE_TAG" "$REPO" "$WORKDIR" 2>/dev/null
 cd "$WORKDIR"
 git checkout -b patched-build 2>/dev/null
 
