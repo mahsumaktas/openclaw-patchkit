@@ -1,0 +1,308 @@
+diff --git a/src/agents/pi-embedded-runner/run.ts b/src/agents/pi-embedded-runner/run.ts
+index 21b29fe2cb6f..05f3f1bf0158 100644
+--- a/src/agents/pi-embedded-runner/run.ts
++++ b/src/agents/pi-embedded-runner/run.ts
+@@ -1469,6 +1469,7 @@ export async function runEmbeddedPiAgent(
+               agentMeta,
+               aborted,
+               systemPromptReport: attempt.systemPromptReport,
++              compactionTimedOut: timedOutDuringCompaction || undefined,
+               // Handle client tool calls (OpenResponses hosted tools)
+               // Propagate the LLM stop reason so callers (lifecycle events,
+               // ACP bridge) can distinguish end_turn from max_tokens.
+diff --git a/src/agents/pi-embedded-runner/types.ts b/src/agents/pi-embedded-runner/types.ts
+index 722abbf2a9ae..dff7b049f48c 100644
+--- a/src/agents/pi-embedded-runner/types.ts
++++ b/src/agents/pi-embedded-runner/types.ts
+@@ -44,6 +44,8 @@ export type EmbeddedPiRunMeta = {
+       | "retry_limit";
+     message: string;
+   };
++  /** True when the run timed out during post-prompt compaction. */
++  compactionTimedOut?: boolean;
+   /** Stop reason for the agent run (e.g., "completed", "tool_calls"). */
+   stopReason?: string;
+   /** Pending tool calls when stopReason is "tool_calls". */
+diff --git a/src/auto-reply/reply/agent-runner-execution.ts b/src/auto-reply/reply/agent-runner-execution.ts
+index 6748e3cbe68c..9d8adf296b1d 100644
+--- a/src/auto-reply/reply/agent-runner-execution.ts
++++ b/src/auto-reply/reply/agent-runner-execution.ts
+@@ -100,6 +100,60 @@ export async function runAgentTurnWithFallback(params: {
+   storePath?: string;
+   resolvedVerboseLevel: VerboseLevel;
+ }): Promise<AgentRunLoopResult> {
++  /** Resolve compaction onFailure policy from config. */
++  function resolveCompactionOnFailure(
++    config: import("../../config/config.js").OpenClawConfig | undefined,
++  ): "reset" | "continue" | "halt" {
++    return config?.agents?.defaults?.compaction?.onFailure ?? "reset";
++  }
++
++  function resolveCompactionOnFailureMessage(
++    config: import("../../config/config.js").OpenClawConfig | undefined,
++  ): string {
++    return (
++      config?.agents?.defaults?.compaction?.onFailureMessage ??
++      "\u26a0\ufe0f Session halted: compaction failed. Use /new to start a fresh session."
++    );
++  }
++
++  async function markSessionHalted(
++    params: {
++      sessionKey?: string;
++      activeSessionStore?: Record<string, import("../../config/sessions.js").SessionEntry>;
++      storePath?: string;
++      getActiveSessionEntry: () => import("../../config/sessions.js").SessionEntry | undefined;
++    },
++    reason: string,
++  ): Promise<void> {
++    if (!params.sessionKey || !params.activeSessionStore || !params.storePath) {
++      defaultRuntime.error(
++        `Cannot persist compaction halt state: missing session params (sessionKey=${params.sessionKey ?? "undefined"})`,
++      );
++      return;
++    }
++    const entry = params.getActiveSessionEntry();
++    if (!entry) {
++      defaultRuntime.error(
++        `Cannot persist compaction halt state: no active session entry for ${params.sessionKey}`,
++      );
++      return;
++    }
++    const now = Date.now();
++    entry.haltedAt = now;
++    entry.haltedReason = reason;
++    params.activeSessionStore[params.sessionKey] = entry;
++    try {
++      await updateSessionStore(params.storePath, (store) => {
++        if (store[params.sessionKey!]) {
++          store[params.sessionKey!].haltedAt = now;
++          store[params.sessionKey!].haltedReason = reason;
++        }
++      });
++    } catch {
++      // Best-effort persistence.
++    }
++  }
++
+   const TRANSIENT_HTTP_RETRY_DELAY_MS = 2_500;
+   let didLogHeartbeatStrip = false;
+   let autoCompactionCompleted = false;
+@@ -487,16 +541,34 @@ export async function runAgentTurnWithFallback(params: {
+       if (
+         embeddedError &&
+         isContextOverflowError(embeddedError.message) &&
+-        !didResetAfterCompactionFailure &&
+-        (await params.resetSessionAfterCompactionFailure(embeddedError.message))
++        !didResetAfterCompactionFailure
+       ) {
+-        didResetAfterCompactionFailure = true;
+-        return {
+-          kind: "final",
+-          payload: {
+-            text: "⚠️ Context limit exceeded. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
+-          },
+-        };
++        const onFailurePolicy = resolveCompactionOnFailure(params.followupRun.run.config);
++        if (onFailurePolicy === "halt") {
++          await markSessionHalted(params, embeddedError.message);
++          didResetAfterCompactionFailure = true;
++          return {
++            kind: "final",
++            payload: { text: resolveCompactionOnFailureMessage(params.followupRun.run.config) },
++          };
++        }
++        if (onFailurePolicy === "continue") {
++          return {
++            kind: "final",
++            payload: {
++              text: "\u26a0\ufe0f Compaction failed but the session will continue. Context may be degraded \u2014 consider using /new if responses seem off.",
++            },
++          };
++        }
++        if (await params.resetSessionAfterCompactionFailure(embeddedError.message)) {
++          didResetAfterCompactionFailure = true;
++          return {
++            kind: "final",
++            payload: {
++              text: "\u26a0\ufe0f Context limit exceeded. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
++            },
++          };
++        }
+       }
+       if (embeddedError?.kind === "role_ordering") {
+         const didReset = await params.resetSessionAfterRoleOrderingConflict(embeddedError.message);
+@@ -519,18 +591,33 @@ export async function runAgentTurnWithFallback(params: {
+       const isRoleOrderingError = /incorrect role information|roles must alternate/i.test(message);
+       const isTransientHttp = isTransientHttpError(message);
+ 
+-      if (
+-        isCompactionFailure &&
+-        !didResetAfterCompactionFailure &&
+-        (await params.resetSessionAfterCompactionFailure(message))
+-      ) {
+-        didResetAfterCompactionFailure = true;
+-        return {
+-          kind: "final",
+-          payload: {
+-            text: "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
+-          },
+-        };
++      if (isCompactionFailure && !didResetAfterCompactionFailure) {
++        const onFailurePolicy = resolveCompactionOnFailure(params.followupRun.run.config);
++        if (onFailurePolicy === "halt") {
++          await markSessionHalted(params, message);
++          didResetAfterCompactionFailure = true;
++          return {
++            kind: "final",
++            payload: { text: resolveCompactionOnFailureMessage(params.followupRun.run.config) },
++          };
++        }
++        if (onFailurePolicy === "continue") {
++          // Skip reset — session continues accepting messages with a user-friendly notice.
++          return {
++            kind: "final",
++            payload: {
++              text: "⚠️ Compaction failed but the session will continue. Context may be degraded — consider using /new if responses seem off.",
++            },
++          };
++        } else if (await params.resetSessionAfterCompactionFailure(message)) {
++          didResetAfterCompactionFailure = true;
++          return {
++            kind: "final",
++            payload: {
++              text: "⚠️ Context limit exceeded during compaction. I've reset our conversation to start fresh - please try again.\n\nTo prevent this, increase your compaction buffer by setting `agents.defaults.compaction.reserveTokensFloor` to 20000 or higher in your config.",
++            },
++          };
++        }
+       }
+       if (isRoleOrderingError) {
+         const didReset = await params.resetSessionAfterRoleOrderingConflict(message);
+@@ -640,6 +727,32 @@ export async function runAgentTurnWithFallback(params: {
+     };
+   }
+ 
++  // Scenario A: compaction timed out during the run — the agent returned a result
++  // using the pre-compaction snapshot, but context is still near-full and will
++  // likely time out again on the next message.  Apply the onFailure policy.
++  if (runResult?.meta?.compactionTimedOut && !didResetAfterCompactionFailure) {
++    const onFailurePolicy = resolveCompactionOnFailure(params.followupRun.run.config);
++    const reason = "Compaction timed out during agent run";
++    if (onFailurePolicy === "halt") {
++      await markSessionHalted(params, reason);
++      return {
++        kind: "final",
++        payload: { text: resolveCompactionOnFailureMessage(params.followupRun.run.config) },
++      };
++    }
++    if (onFailurePolicy === "reset") {
++      if (await params.resetSessionAfterCompactionFailure(reason)) {
++        return {
++          kind: "final",
++          payload: {
++            text: "\u26a0\ufe0f Compaction timed out. I've reset our conversation to start fresh - please try again.",
++          },
++        };
++      }
++    }
++    // "continue": fall through — return the (possibly degraded) result as-is.
++  }
++
+   return {
+     kind: "success",
+     runId,
+diff --git a/src/auto-reply/reply/agent-runner.ts b/src/auto-reply/reply/agent-runner.ts
+index b6dcd7dcd91d..32f881f04745 100644
+--- a/src/auto-reply/reply/agent-runner.ts
++++ b/src/auto-reply/reply/agent-runner.ts
+@@ -123,6 +123,18 @@ export async function runReplyAgent(params: {
+   let activeIsNewSession = isNewSession;
+ 
+   const isHeartbeat = opts?.isHeartbeat === true;
++
++  // Early exit if session was halted due to compaction failure.
++  // Block all turns — including heartbeats — to stop token spend (#33898).
++  if (activeSessionEntry?.haltedAt) {
++    if (isHeartbeat) {
++      return { text: "HEARTBEAT_OK" };
++    }
++    const haltMessage =
++      followupRun.run.config?.agents?.defaults?.compaction?.onFailureMessage ??
++      "\u26a0\ufe0f Session halted: compaction failed. Use /new to start a fresh session.";
++    return { text: haltMessage };
++  }
+   const typingSignals = createTypingSignaler({
+     typing,
+     mode: typingMode,
+diff --git a/src/auto-reply/reply/session.ts b/src/auto-reply/reply/session.ts
+index 6db6b1708cb6..4e7b7133c162 100644
+--- a/src/auto-reply/reply/session.ts
++++ b/src/auto-reply/reply/session.ts
+@@ -539,6 +539,9 @@ export async function initSessionState(params: {
+     sessionEntry.inputTokens = undefined;
+     sessionEntry.outputTokens = undefined;
+     sessionEntry.contextTokens = undefined;
++    // Clear compaction halt state so /new unblocks a halted session.
++    sessionEntry.haltedAt = undefined;
++    sessionEntry.haltedReason = undefined;
+   }
+   // Preserve per-session overrides while resetting compaction state on /new.
+   sessionStore[sessionKey] = { ...sessionStore[sessionKey], ...sessionEntry };
+diff --git a/src/config/sessions/types.ts b/src/config/sessions/types.ts
+index 81d67d130117..86645087c19f 100644
+--- a/src/config/sessions/types.ts
++++ b/src/config/sessions/types.ts
+@@ -164,6 +164,10 @@ export type SessionEntry = {
+   skillsSnapshot?: SessionSkillSnapshot;
+   systemPromptReport?: SessionSystemPromptReport;
+   acp?: SessionAcpMeta;
++  /** Timestamp (ms) when the session was halted due to compaction failure. */
++  haltedAt?: number;
++  /** Human-readable reason why the session was halted. */
++  haltedReason?: string;
+ };
+ 
+ function normalizeRuntimeField(value: string | undefined): string | undefined {
+diff --git a/src/config/types.agent-defaults.ts b/src/config/types.agent-defaults.ts
+index 9124e4084d88..a30c99f1d0f9 100644
+--- a/src/config/types.agent-defaults.ts
++++ b/src/config/types.agent-defaults.ts
+@@ -294,6 +294,7 @@ export type AgentCompactionQualityGuardConfig = {
+   /** Maximum regeneration retries after a failed quality audit. Default: 1 when enabled. */
+   maxRetries?: number;
+ };
++export type AgentCompactionOnFailure = "reset" | "continue" | "halt";
+ 
+ export type AgentCompactionConfig = {
+   /** Compaction summarization mode. */
+@@ -326,6 +327,15 @@ export type AgentCompactionConfig = {
+    * When set, compaction uses this model instead of the agent's primary model.
+    * Falls back to the primary model when unset. */
+   model?: string;
++  /**
++   * What to do when compaction fails or times out.
++   * - "reset" (default): reset the session and start fresh (current behavior).
++   * - "continue": skip reset, session continues accepting messages (may degrade).
++   * - "halt": halt the session so no further messages are processed until /new.
++   */
++  onFailure?: AgentCompactionOnFailure;
++  /** Custom message returned when session is halted due to compaction failure. Only used with onFailure: "halt". */
++  onFailureMessage?: string;
+ };
+ 
+ export type AgentCompactionMemoryFlushConfig = {
+diff --git a/src/config/zod-schema.agent-defaults.ts b/src/config/zod-schema.agent-defaults.ts
+index 242d6959729a..52acae9aa280 100644
+--- a/src/config/zod-schema.agent-defaults.ts
++++ b/src/config/zod-schema.agent-defaults.ts
+@@ -122,6 +122,10 @@ export const AgentDefaultsSchema = z
+           })
+           .strict()
+           .optional(),
++        onFailure: z
++          .union([z.literal("reset"), z.literal("continue"), z.literal("halt")])
++          .optional(),
++        onFailureMessage: z.string().optional(),
+       })
+       .strict()
+       .optional(),

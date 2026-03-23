@@ -1,0 +1,413 @@
+diff --git a/scripts/check-no-monolithic-plugin-sdk-entry-imports.ts b/scripts/check-no-monolithic-plugin-sdk-entry-imports.ts
+index 9b77ae9cf61a..5f5b7504a9c9 100644
+--- a/scripts/check-no-monolithic-plugin-sdk-entry-imports.ts
++++ b/scripts/check-no-monolithic-plugin-sdk-entry-imports.ts
+@@ -1,3 +1,4 @@
++import { execFileSync } from "node:child_process";
+ import fs from "node:fs";
+ import path from "node:path";
+ import { discoverOpenClawPlugins } from "../src/plugins/discovery.js";
+@@ -59,7 +60,32 @@ function collectPluginSourceFiles(rootDir: string): string[] {
+   return files;
+ }
+ 
++function loadTrackedFiles(rootDir: string): Set<string> {
++  try {
++    const output = execFileSync("git", ["ls-files", "-z"], {
++      cwd: rootDir,
++      encoding: "utf8",
++      stdio: ["ignore", "pipe", "ignore"],
++    });
++    const tracked = new Set<string>();
++    for (const file of output.split("\0")) {
++      if (file) {
++        tracked.add(file);
++      }
++    }
++    return tracked;
++  } catch {
++    return new Set<string>();
++  }
++}
++
++function toGitRelativePath(rootDir: string, filePath: string): string {
++  return path.relative(rootDir, filePath).split(path.sep).join("/");
++}
++
+ function main() {
++  const cwd = process.cwd();
++  const trackedFiles = loadTrackedFiles(cwd);
+   const discovery = discoverOpenClawPlugins({});
+   const bundledCandidates = discovery.candidates.filter((c) => c.origin === "bundled");
+   const filesToCheck = new Set<string>();
+@@ -72,6 +98,11 @@ function main() {
+ 
+   const offenders: string[] = [];
+   for (const entryFile of filesToCheck) {
++    const relative = toGitRelativePath(cwd, entryFile);
++    // Ignore stale untracked files (e.g. from runner caches/workspace reuse).
++    if (trackedFiles.size > 0 && !trackedFiles.has(relative)) {
++      continue;
++    }
+     let content = "";
+     try {
+       content = fs.readFileSync(entryFile, "utf8");
+diff --git a/src/daemon/runtime-paths.test.ts b/src/daemon/runtime-paths.test.ts
+index 3b502193a338..c52597e4111b 100644
+--- a/src/daemon/runtime-paths.test.ts
++++ b/src/daemon/runtime-paths.test.ts
+@@ -214,6 +214,7 @@ describe("resolvePreferredNodePath — Homebrew Cellar", () => {
+ 
+ describe("resolveSystemNodeInfo", () => {
+   const darwinNode = "/opt/homebrew/bin/node";
++  const darwinNode22 = "/opt/homebrew/opt/node@22/bin/node";
+ 
+   it("returns supported info when version is new enough", async () => {
+     mockNodePathPresent(darwinNode);
+@@ -241,6 +242,41 @@ describe("resolveSystemNodeInfo", () => {
+     expect(result).toBeNull();
+   });
+ 
++  it("detects Homebrew node@22 when the default node symlink is missing", async () => {
++    mockNodePathPresent(darwinNode22);
++    const execFile = vi.fn().mockResolvedValue({ stdout: "22.12.1\n", stderr: "" });
++
++    const result = await resolveSystemNodeInfo({
++      env: {},
++      platform: "darwin",
++      execFile,
++    });
++
++    expect(result).toEqual({
++      path: darwinNode22,
++      version: "22.12.1",
++      supported: true,
++    });
++  });
++
++  it("respects HOMEBREW_PREFIX candidates for versioned node formulas", async () => {
++    const customNode = "/custom/homebrew/opt/node@24/bin/node";
++    mockNodePathPresent(customNode);
++    const execFile = vi.fn().mockResolvedValue({ stdout: "24.9.0\n", stderr: "" });
++
++    const result = await resolveSystemNodeInfo({
++      env: { HOMEBREW_PREFIX: "/custom/homebrew" },
++      platform: "darwin",
++      execFile,
++    });
++
++    expect(result).toEqual({
++      path: customNode,
++      version: "24.9.0",
++      supported: true,
++    });
++  });
++
+   it("renders a warning when system node is too old", () => {
+     const warning = renderSystemNodeWarning(
+       {
+diff --git a/src/daemon/runtime-paths.ts b/src/daemon/runtime-paths.ts
+index a3b737d15bf8..345528b87651 100644
+--- a/src/daemon/runtime-paths.ts
++++ b/src/daemon/runtime-paths.ts
+@@ -35,12 +35,45 @@ function normalizeForCompare(input: string, platform: NodeJS.Platform): string {
+   return normalized;
+ }
+ 
++function uniquePreserveOrder(items: string[]): string[] {
++  const seen = new Set<string>();
++  const unique: string[] = [];
++  for (const item of items) {
++    if (!item || seen.has(item)) {
++      continue;
++    }
++    seen.add(item);
++    unique.push(item);
++  }
++  return unique;
++}
++
++function resolveHomebrewPrefixes(env: Record<string, string | undefined>): string[] {
++  const candidates = [env.HOMEBREW_PREFIX?.trim(), "/opt/homebrew", "/usr/local"];
++  return uniquePreserveOrder(candidates.filter((value): value is string => Boolean(value)));
++}
++
++function buildDarwinSystemNodeCandidates(
++  env: Record<string, string | undefined>,
++  pathModule: typeof path.posix,
++): string[] {
++  const candidates: string[] = [];
++  for (const prefix of resolveHomebrewPrefixes(env)) {
++    candidates.push(pathModule.join(prefix, "opt", "node@24", "bin", "node"));
++    candidates.push(pathModule.join(prefix, "opt", "node@22", "bin", "node"));
++    candidates.push(pathModule.join(prefix, "opt", "node", "bin", "node"));
++    candidates.push(pathModule.join(prefix, "bin", "node"));
++  }
++  candidates.push("/usr/bin/node");
++  return uniquePreserveOrder(candidates);
++}
++
+ function buildSystemNodeCandidates(
+   env: Record<string, string | undefined>,
+   platform: NodeJS.Platform,
+ ): string[] {
+   if (platform === "darwin") {
+-    return ["/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node"];
++    return buildDarwinSystemNodeCandidates(env, path.posix);
+   }
+   if (platform === "linux") {
+     return ["/usr/local/bin/node", "/usr/bin/node"];
+diff --git a/src/daemon/service-env.test.ts b/src/daemon/service-env.test.ts
+index 4080cd88fcf0..dd1dd17eb11d 100644
+--- a/src/daemon/service-env.test.ts
++++ b/src/daemon/service-env.test.ts
+@@ -179,12 +179,33 @@ describe("buildMinimalServicePath", () => {
+       platform: "darwin",
+     });
+     const parts = splitPath(result, "darwin");
++    expect(parts).toContain("/opt/homebrew/opt/node@24/bin");
++    expect(parts).toContain("/opt/homebrew/opt/node@22/bin");
++    expect(parts).toContain("/opt/homebrew/opt/node/bin");
+     expect(parts).toContain("/opt/homebrew/bin");
++    expect(parts).toContain("/usr/local/opt/node@24/bin");
++    expect(parts).toContain("/usr/local/opt/node@22/bin");
++    expect(parts).toContain("/usr/local/opt/node/bin");
+     expect(parts).toContain("/usr/local/bin");
+     expect(parts).toContain("/usr/bin");
+     expect(parts).toContain("/bin");
+   });
+ 
++  it("includes HOMEBREW_PREFIX node bins on macOS", () => {
++    const result = buildMinimalServicePath({
++      platform: "darwin",
++      env: {
++        HOME: "/Users/alice",
++        HOMEBREW_PREFIX: "/custom/homebrew",
++      },
++    });
++    const parts = splitPath(result, "darwin");
++    expect(parts).toContain("/custom/homebrew/opt/node@24/bin");
++    expect(parts).toContain("/custom/homebrew/opt/node@22/bin");
++    expect(parts).toContain("/custom/homebrew/opt/node/bin");
++    expect(parts).toContain("/custom/homebrew/bin");
++  });
++
+   it("returns PATH as-is on Windows", () => {
+     const result = buildMinimalServicePath({
+       env: { PATH: "C:\\\\Windows\\\\System32" },
+diff --git a/src/daemon/service-env.ts b/src/daemon/service-env.ts
+index f0534746aa7e..a8689eb52744 100644
+--- a/src/daemon/service-env.ts
++++ b/src/daemon/service-env.ts
+@@ -97,9 +97,42 @@ function addCommonEnvConfiguredBinDirs(
+   addNonEmptyDir(dirs, appendSubdir(env?.ASDF_DATA_DIR, "shims"));
+ }
+ 
+-function resolveSystemPathDirs(platform: NodeJS.Platform): string[] {
++function uniquePreserveOrder(items: string[]): string[] {
++  const seen = new Set<string>();
++  const unique: string[] = [];
++  for (const item of items) {
++    if (!item || seen.has(item)) {
++      continue;
++    }
++    seen.add(item);
++    unique.push(item);
++  }
++  return unique;
++}
++
++function resolveHomebrewPrefixes(env?: Record<string, string | undefined>): string[] {
++  const candidates = [env?.HOMEBREW_PREFIX?.trim(), "/opt/homebrew", "/usr/local"];
++  return uniquePreserveOrder(candidates.filter((value): value is string => Boolean(value)));
++}
++
++function resolveDarwinSystemPathDirs(env?: Record<string, string | undefined>): string[] {
++  const dirs: string[] = [];
++  for (const prefix of resolveHomebrewPrefixes(env)) {
++    dirs.push(path.posix.join(prefix, "opt", "node@24", "bin"));
++    dirs.push(path.posix.join(prefix, "opt", "node@22", "bin"));
++    dirs.push(path.posix.join(prefix, "opt", "node", "bin"));
++    dirs.push(path.posix.join(prefix, "bin"));
++  }
++  dirs.push("/usr/bin", "/bin");
++  return uniquePreserveOrder(dirs);
++}
++
++function resolveSystemPathDirs(
++  platform: NodeJS.Platform,
++  env?: Record<string, string | undefined>,
++): string[] {
+   if (platform === "darwin") {
+-    return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
++    return resolveDarwinSystemPathDirs(env);
+   }
+   if (platform === "linux") {
+     return ["/usr/local/bin", "/usr/bin", "/bin"];
+@@ -189,7 +222,7 @@ export function getMinimalServicePathParts(options: MinimalServicePathOptions =
+ 
+   const parts: string[] = [];
+   const extraDirs = options.extraDirs ?? [];
+-  const systemDirs = resolveSystemPathDirs(platform);
++  const systemDirs = resolveSystemPathDirs(platform, options.env);
+ 
+   // Add user bin directories for version managers (npm global, nvm, fnm, volta, etc.)
+   const userDirs =
+diff --git a/src/wizard/onboarding.finalize.test.ts b/src/wizard/onboarding.finalize.test.ts
+index ea7f6ce23bdc..1ec680584860 100644
+--- a/src/wizard/onboarding.finalize.test.ts
++++ b/src/wizard/onboarding.finalize.test.ts
+@@ -12,6 +12,7 @@ const buildGatewayInstallPlan = vi.hoisted(() =>
+     environment: {},
+   })),
+ );
++const gatewayInstallErrorHint = vi.hoisted(() => vi.fn(() => "hint"));
+ const gatewayServiceInstall = vi.hoisted(() => vi.fn(async () => {}));
+ const resolveGatewayInstallToken = vi.hoisted(() =>
+   vi.fn(async () => ({
+@@ -21,6 +22,9 @@ const resolveGatewayInstallToken = vi.hoisted(() =>
+   })),
+ );
+ const isSystemdUserServiceAvailable = vi.hoisted(() => vi.fn(async () => true));
++const readSystemdUserLingerStatus = vi.hoisted(() =>
++  vi.fn(async () => ({ user: "runner", linger: "yes" })),
++);
+ 
+ vi.mock("../commands/onboard-helpers.js", () => ({
+   detectBrowserOpenSupport: vi.fn(async () => ({ ok: false })),
+@@ -36,7 +40,7 @@ vi.mock("../commands/onboard-helpers.js", () => ({
+ 
+ vi.mock("../commands/daemon-install-helpers.js", () => ({
+   buildGatewayInstallPlan,
+-  gatewayInstallErrorHint: vi.fn(() => "hint"),
++  gatewayInstallErrorHint,
+ }));
+ 
+ vi.mock("../commands/gateway-install-token.js", () => ({
+@@ -70,6 +74,7 @@ vi.mock("../daemon/systemd.js", async (importOriginal) => {
+   return {
+     ...actual,
+     isSystemdUserServiceAvailable,
++    readSystemdUserLingerStatus,
+   };
+ });
+ 
+@@ -104,11 +109,20 @@ describe("finalizeOnboardingWizard", () => {
+     runTui.mockClear();
+     probeGatewayReachable.mockClear();
+     setupOnboardingShellCompletion.mockClear();
+-    buildGatewayInstallPlan.mockClear();
++    buildGatewayInstallPlan.mockReset();
++    gatewayInstallErrorHint.mockReset();
+     gatewayServiceInstall.mockClear();
+     resolveGatewayInstallToken.mockClear();
+     isSystemdUserServiceAvailable.mockReset();
++    readSystemdUserLingerStatus.mockReset();
++    buildGatewayInstallPlan.mockResolvedValue({
++      programArguments: [],
++      workingDirectory: "/tmp",
++      environment: {},
++    });
++    gatewayInstallErrorHint.mockReturnValue("hint");
+     isSystemdUserServiceAvailable.mockResolvedValue(true);
++    readSystemdUserLingerStatus.mockResolvedValue({ user: "runner", linger: "yes" });
+   });
+ 
+   it("resolves gateway password SecretRef for probe and TUI", async () => {
+@@ -240,4 +254,47 @@ describe("finalizeOnboardingWizard", () => {
+     );
+     expect(gatewayServiceInstall).toHaveBeenCalledTimes(1);
+   });
++
++  it("shows missing-node guidance when gateway service install cannot find node", async () => {
++    buildGatewayInstallPlan.mockRejectedValueOnce(new Error("Node not found in PATH."));
++    const note = vi.fn(async () => {});
++    const prompter = buildWizardPrompter({
++      note: note as never,
++      confirm: vi.fn(async () => false),
++    });
++    const runtime = createRuntime();
++
++    await finalizeOnboardingWizard({
++      flow: "quickstart",
++      opts: {
++        acceptRisk: true,
++        authChoice: "skip",
++        installDaemon: true,
++        skipHealth: true,
++        skipUi: true,
++      },
++      baseConfig: {},
++      nextConfig: {},
++      workspaceDir: "/tmp",
++      settings: {
++        port: 18789,
++        bind: "loopback",
++        authMode: "token",
++        gatewayToken: "gateway-token",
++        tailscaleMode: "off",
++        tailscaleResetOnExit: false,
++      },
++      prompter,
++      runtime,
++    });
++
++    const notes = note.mock.calls
++      .map((call) => {
++        const first = (call as unknown[])[0];
++        return typeof first === "string" ? first : "";
++      })
++      .join("\n");
++    expect(notes).toContain("Node runtime was not found while installing the Gateway service.");
++    expect(notes).toContain("Install Node 22+ and rerun");
++  });
+ });
+diff --git a/src/wizard/onboarding.finalize.ts b/src/wizard/onboarding.finalize.ts
+index 62f452de39ea..5132aab0bfd0 100644
+--- a/src/wizard/onboarding.finalize.ts
++++ b/src/wizard/onboarding.finalize.ts
+@@ -46,6 +46,33 @@ type FinalizeOnboardingOptions = {
+   runtime: RuntimeEnv;
+ };
+ 
++function renderMissingNodeInstallHint(
++  installError: string,
++  platform: NodeJS.Platform = process.platform,
++): string | null {
++  const normalized = installError.toLowerCase();
++  const missingNode =
++    normalized.includes("node not found in path") ||
++    normalized.includes("command not found: node") ||
++    normalized.includes("env: node") ||
++    (normalized.includes("no such file or directory") && normalized.includes("node"));
++  if (!missingNode) {
++    return null;
++  }
++
++  const lines = [
++    "Node runtime was not found while installing the Gateway service.",
++    `Install Node 22+ and rerun ${formatCliCommand("openclaw gateway install")}.`,
++  ];
++  if (platform === "darwin") {
++    lines.push(
++      "macOS quick fix: brew install node@22",
++      `Then ensure non-interactive shells include Homebrew bin directories before retrying ${formatCliCommand("openclaw onboard --install-daemon")}.`,
++    );
++  }
++  return lines.join("\n");
++}
++
+ export async function finalizeOnboardingWizard(
+   options: FinalizeOnboardingOptions,
+ ): Promise<{ launchedTui: boolean }> {
+@@ -209,6 +236,10 @@ export async function finalizeOnboardingWizard(
+       }
+       if (installError) {
+         await prompter.note(`Gateway service install failed: ${installError}`, "Gateway");
++        const missingNodeHint = renderMissingNodeInstallHint(installError);
++        if (missingNodeHint) {
++          await prompter.note(missingNodeHint, "Gateway runtime");
++        }
+         await prompter.note(gatewayInstallErrorHint(), "Gateway");
+       }
+     }

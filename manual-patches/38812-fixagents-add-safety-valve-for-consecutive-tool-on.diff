@@ -1,0 +1,1328 @@
+diff --git a/docs/.generated/config-baseline.json b/docs/.generated/config-baseline.json
+index 8b8eb90c21ed..25f189fb3b7c 100644
+--- a/docs/.generated/config-baseline.json
++++ b/docs/.generated/config-baseline.json
+@@ -7009,6 +7009,26 @@
+       "tags": [],
+       "hasChildren": false
+     },
++    {
++      "path": "agents.list.*.tools.maxConsecutiveToolOnlyTurns",
++      "kind": "core",
++      "type": "integer",
++      "required": false,
++      "deprecated": false,
++      "sensitive": false,
++      "tags": [],
++      "hasChildren": false
++    },
++    {
++      "path": "agents.list.*.tools.notifyUserOnApiError",
++      "kind": "core",
++      "type": "boolean",
++      "required": false,
++      "deprecated": false,
++      "sensitive": false,
++      "tags": [],
++      "hasChildren": false
++    },
+     {
+       "path": "agents.list.*.tools.profile",
+       "kind": "core",
+@@ -61176,6 +61196,16 @@
+       "help": "Warning threshold for repetitive patterns when detector is enabled (default: 10).",
+       "hasChildren": false
+     },
++    {
++      "path": "tools.maxConsecutiveToolOnlyTurns",
++      "kind": "core",
++      "type": "integer",
++      "required": false,
++      "deprecated": false,
++      "sensitive": false,
++      "tags": [],
++      "hasChildren": false
++    },
+     {
+       "path": "tools.media",
+       "kind": "core",
+@@ -63594,6 +63624,16 @@
+       "help": "Text suffix for cross-context markers (supports \"{channel}\").",
+       "hasChildren": false
+     },
++    {
++      "path": "tools.notifyUserOnApiError",
++      "kind": "core",
++      "type": "boolean",
++      "required": false,
++      "deprecated": false,
++      "sensitive": false,
++      "tags": [],
++      "hasChildren": false
++    },
+     {
+       "path": "tools.profile",
+       "kind": "core",
+diff --git a/docs/.generated/config-baseline.jsonl b/docs/.generated/config-baseline.jsonl
+index 887e04bb7379..bdaa68f0601d 100644
+--- a/docs/.generated/config-baseline.jsonl
++++ b/docs/.generated/config-baseline.jsonl
+@@ -1,4 +1,4 @@
+-{"generatedBy":"scripts/generate-config-doc-baseline.ts","recordType":"meta","totalPaths":5594}
++{"generatedBy":"scripts/generate-config-doc-baseline.ts","recordType":"meta","totalPaths":5598}
+ {"recordType":"path","path":"acp","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":["advanced"],"label":"ACP","help":"ACP runtime controls for enabling dispatch, selecting backends, constraining allowed agent targets, and tuning streamed turn projection behavior.","hasChildren":true}
+ {"recordType":"path","path":"acp.allowedAgents","kind":"core","type":"array","required":false,"deprecated":false,"sensitive":false,"tags":["access"],"label":"ACP Allowed Agents","help":"Allowlist of ACP target agent ids permitted for ACP runtime sessions. Empty means no additional allowlist restriction.","hasChildren":true}
+ {"recordType":"path","path":"acp.allowedAgents.*","kind":"core","type":"string","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+@@ -628,6 +628,8 @@
+ {"recordType":"path","path":"agents.list.*.tools.loopDetection.globalCircuitBreakerThreshold","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+ {"recordType":"path","path":"agents.list.*.tools.loopDetection.historySize","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+ {"recordType":"path","path":"agents.list.*.tools.loopDetection.warningThreshold","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
++{"recordType":"path","path":"agents.list.*.tools.maxConsecutiveToolOnlyTurns","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
++{"recordType":"path","path":"agents.list.*.tools.notifyUserOnApiError","kind":"core","type":"boolean","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+ {"recordType":"path","path":"agents.list.*.tools.profile","kind":"core","type":"string","required":false,"deprecated":false,"sensitive":false,"tags":["storage"],"label":"Agent Tool Profile","help":"Per-agent override for tool profile selection when one agent needs a different capability baseline. Use this sparingly so policy differences across agents stay intentional and reviewable.","hasChildren":false}
+ {"recordType":"path","path":"agents.list.*.tools.sandbox","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":true}
+ {"recordType":"path","path":"agents.list.*.tools.sandbox.tools","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":true}
+@@ -5245,6 +5247,7 @@
+ {"recordType":"path","path":"tools.loopDetection.globalCircuitBreakerThreshold","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":["reliability","tools"],"label":"Tool-loop Global Circuit Breaker Threshold","help":"Global no-progress breaker threshold (default: 30).","hasChildren":false}
+ {"recordType":"path","path":"tools.loopDetection.historySize","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":["tools"],"label":"Tool-loop History Size","help":"Tool history window size for loop detection (default: 30).","hasChildren":false}
+ {"recordType":"path","path":"tools.loopDetection.warningThreshold","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":["tools"],"label":"Tool-loop Warning Threshold","help":"Warning threshold for repetitive patterns when detector is enabled (default: 10).","hasChildren":false}
++{"recordType":"path","path":"tools.maxConsecutiveToolOnlyTurns","kind":"core","type":"integer","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+ {"recordType":"path","path":"tools.media","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":true}
+ {"recordType":"path","path":"tools.media.audio","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":true}
+ {"recordType":"path","path":"tools.media.audio.attachments","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":["media","tools"],"label":"Audio Understanding Attachment Policy","help":"Attachment policy for audio inputs indicating which uploaded files are eligible for audio processing. Keep restrictive defaults in mixed-content channels to avoid unintended audio workloads.","hasChildren":true}
+@@ -5465,6 +5468,7 @@
+ {"recordType":"path","path":"tools.message.crossContext.marker.enabled","kind":"core","type":"boolean","required":false,"deprecated":false,"sensitive":false,"tags":["tools"],"label":"Cross-Context Marker","help":"Add a visible origin marker when sending cross-context (default: true).","hasChildren":false}
+ {"recordType":"path","path":"tools.message.crossContext.marker.prefix","kind":"core","type":"string","required":false,"deprecated":false,"sensitive":false,"tags":["tools"],"label":"Cross-Context Marker Prefix","help":"Text prefix for cross-context markers (supports \"{channel}\").","hasChildren":false}
+ {"recordType":"path","path":"tools.message.crossContext.marker.suffix","kind":"core","type":"string","required":false,"deprecated":false,"sensitive":false,"tags":["tools"],"label":"Cross-Context Marker Suffix","help":"Text suffix for cross-context markers (supports \"{channel}\").","hasChildren":false}
++{"recordType":"path","path":"tools.notifyUserOnApiError","kind":"core","type":"boolean","required":false,"deprecated":false,"sensitive":false,"tags":[],"hasChildren":false}
+ {"recordType":"path","path":"tools.profile","kind":"core","type":"string","required":false,"deprecated":false,"sensitive":false,"tags":["storage","tools"],"label":"Tool Profile","help":"Global tool profile name used to select a predefined tool policy baseline before applying allow/deny overrides. Use this for consistent environment posture across agents and keep profile names stable.","hasChildren":false}
+ {"recordType":"path","path":"tools.sandbox","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":["storage","tools"],"label":"Sandbox Tool Policy","help":"Tool policy wrapper for sandboxed agent executions so sandbox runs can have distinct capability boundaries. Use this to enforce stronger safety in sandbox contexts.","hasChildren":true}
+ {"recordType":"path","path":"tools.sandbox.tools","kind":"core","type":"object","required":false,"deprecated":false,"sensitive":false,"tags":["storage","tools"],"label":"Sandbox Tool Allow/Deny Policy","help":"Allow/deny tool policy applied when agents run in sandboxed execution environments. Keep policies minimal so sandbox tasks cannot escalate into unnecessary external actions.","hasChildren":true}
+diff --git a/extensions/irc/src/inbound.behavior.test.ts b/extensions/irc/src/inbound.behavior.test.ts
+index f0882cef62bf..a8637bce13a8 100644
+--- a/extensions/irc/src/inbound.behavior.test.ts
++++ b/extensions/irc/src/inbound.behavior.test.ts
+@@ -1,7 +1,7 @@
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+-import type { RuntimeEnv } from "./runtime-api.js";
+ import type { ResolvedIrcAccount } from "./accounts.js";
+ import { handleIrcInbound } from "./inbound.js";
++import type { RuntimeEnv } from "./runtime-api.js";
+ import { setIrcRuntime } from "./runtime.js";
+ import type { CoreConfig, IrcInboundMessage } from "./types.js";
+ 
+diff --git a/extensions/mattermost/src/mattermost/directory.test.ts b/extensions/mattermost/src/mattermost/directory.test.ts
+index dd4848c60945..9d955169367b 100644
+--- a/extensions/mattermost/src/mattermost/directory.test.ts
++++ b/extensions/mattermost/src/mattermost/directory.test.ts
+@@ -38,13 +38,11 @@ describe("mattermost directory", () => {
+   it("deduplicates channels across enabled accounts and skips failing accounts", async () => {
+     const clientA = {
+       token: "token-a",
+-      request: vi
+-        .fn()
+-        .mockResolvedValueOnce([
+-          { id: "chan-1", type: "O", name: "alerts", display_name: "Alerts" },
+-          { id: "chan-2", type: "P", name: "ops", display_name: "Ops" },
+-          { id: "chan-3", type: "D", name: "dm", display_name: "Direct" },
+-        ]),
++      request: vi.fn().mockResolvedValueOnce([
++        { id: "chan-1", type: "O", name: "alerts", display_name: "Alerts" },
++        { id: "chan-2", type: "P", name: "ops", display_name: "Ops" },
++        { id: "chan-3", type: "D", name: "dm", display_name: "Direct" },
++      ]),
+     };
+     const clientB = {
+       token: "token-b",
+@@ -86,11 +84,7 @@ describe("mattermost directory", () => {
+       request: vi
+         .fn()
+         .mockResolvedValueOnce([{ id: "team-1" }])
+-        .mockResolvedValueOnce([
+-          { user_id: "me-1" },
+-          { user_id: "user-1" },
+-          { user_id: "user-2" },
+-        ])
++        .mockResolvedValueOnce([{ user_id: "me-1" }, { user_id: "user-1" }, { user_id: "user-2" }])
+         .mockResolvedValueOnce([
+           {
+             id: "user-1",
+diff --git a/extensions/msteams/src/setup-surface.test.ts b/extensions/msteams/src/setup-surface.test.ts
+index cf86ffb8ecd1..47a6f3a26f72 100644
+--- a/extensions/msteams/src/setup-surface.test.ts
++++ b/extensions/msteams/src/setup-surface.test.ts
+@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ 
+ const resolveMSTeamsUserAllowlist = vi.hoisted(() => vi.fn());
+ const resolveMSTeamsChannelAllowlist = vi.hoisted(() => vi.fn());
+-const normalizeSecretInputString = vi.hoisted(() => vi.fn((value: unknown) => String(value ?? "").trim() || undefined));
++const normalizeSecretInputString = vi.hoisted(() =>
++  vi.fn((value: unknown) => String(value ?? "").trim() || undefined),
++);
+ const hasConfiguredMSTeamsCredentials = vi.hoisted(() => vi.fn());
+ const resolveMSTeamsCredentials = vi.hoisted(() => vi.fn());
+ 
+diff --git a/extensions/nextcloud-talk/src/inbound.behavior.test.ts b/extensions/nextcloud-talk/src/inbound.behavior.test.ts
+index 107f3bd5c53a..7a24a4660553 100644
+--- a/extensions/nextcloud-talk/src/inbound.behavior.test.ts
++++ b/extensions/nextcloud-talk/src/inbound.behavior.test.ts
+@@ -84,7 +84,9 @@ function createRuntimeEnv() {
+   } as unknown as RuntimeEnv;
+ }
+ 
+-function createAccount(overrides?: Partial<ResolvedNextcloudTalkAccount>): ResolvedNextcloudTalkAccount {
++function createAccount(
++  overrides?: Partial<ResolvedNextcloudTalkAccount>,
++): ResolvedNextcloudTalkAccount {
+   return {
+     accountId: "default",
+     enabled: true,
+@@ -101,7 +103,9 @@ function createAccount(overrides?: Partial<ResolvedNextcloudTalkAccount>): Resol
+   };
+ }
+ 
+-function createMessage(overrides?: Partial<NextcloudTalkInboundMessage>): NextcloudTalkInboundMessage {
++function createMessage(
++  overrides?: Partial<NextcloudTalkInboundMessage>,
++): NextcloudTalkInboundMessage {
+   return {
+     messageId: "msg-1",
+     roomToken: "room-1",
+@@ -160,7 +164,9 @@ describe("nextcloud-talk inbound behavior", () => {
+       accountId: "default",
+     });
+     expect(dispatchInboundReplyWithBaseMock).not.toHaveBeenCalled();
+-    expect(statusSink).toHaveBeenCalledWith(expect.objectContaining({ lastOutboundAt: expect.any(Number) }));
++    expect(statusSink).toHaveBeenCalledWith(
++      expect.objectContaining({ lastOutboundAt: expect.any(Number) }),
++    );
+   });
+ 
+   it("drops unmentioned group traffic before dispatch", async () => {
+diff --git a/extensions/openshell/src/remote-fs-bridge.test.ts b/extensions/openshell/src/remote-fs-bridge.test.ts
+index eee6e980cbac..9e8dc7509aee 100644
+--- a/extensions/openshell/src/remote-fs-bridge.test.ts
++++ b/extensions/openshell/src/remote-fs-bridge.test.ts
+@@ -93,7 +93,9 @@ async function emulateRemoteShell(params: {
+       return { stdout: await fs.readFile(params.args[0] ?? ""), stderr: Buffer.alloc(0), code: 0 };
+     }
+ 
+-    if (params.script === 'if [ -e "$1" ] || [ -L "$1" ]; then printf "1\\n"; else printf "0\\n"; fi') {
++    if (
++      params.script === 'if [ -e "$1" ] || [ -L "$1" ]; then printf "1\\n"; else printf "0\\n"; fi'
++    ) {
+       const target = params.args[0] ?? "";
+       const exists = await pathExistsOrSymlink(target);
+       return { stdout: Buffer.from(exists ? "1\n" : "0\n"), stderr: Buffer.alloc(0), code: 0 };
+@@ -129,7 +131,7 @@ async function emulateRemoteShell(params: {
+       };
+     }
+ 
+-    if (params.script.includes('python3 /dev/fd/3 "$@" 3<<\'PY\'')) {
++    if (params.script.includes("python3 /dev/fd/3 \"$@\" 3<<'PY'")) {
+       await applyMutation(params.args, params.stdin);
+       return { stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), code: 0 };
+     }
+diff --git a/src/agents/pi-embedded-runner.api-error-notice.test.ts b/src/agents/pi-embedded-runner.api-error-notice.test.ts
+new file mode 100644
+index 000000000000..6eaa5222d6b5
+--- /dev/null
++++ b/src/agents/pi-embedded-runner.api-error-notice.test.ts
+@@ -0,0 +1,74 @@
++import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
++import { makeAttemptResult } from "./pi-embedded-runner/run.overflow-compaction.fixture.js";
++import {
++  loadRunOverflowCompactionHarness,
++  mockedClassifyFailoverReason,
++  mockedIsFailoverErrorMessage,
++  mockedRunEmbeddedAttempt,
++} from "./pi-embedded-runner/run.overflow-compaction.harness.js";
++
++describe("runEmbeddedPiAgent API error notices", () => {
++  let runEmbeddedPiAgent: typeof import("./pi-embedded-runner/run.js").runEmbeddedPiAgent;
++
++  beforeAll(async () => {
++    ({ runEmbeddedPiAgent } = await loadRunOverflowCompactionHarness());
++  });
++
++  beforeEach(() => {
++    vi.clearAllMocks();
++    mockedClassifyFailoverReason.mockReturnValue("overloaded");
++    mockedIsFailoverErrorMessage.mockReturnValue(true);
++  });
++
++  it("uses agent-level tool overrides when deciding whether to notify the user", async () => {
++    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
++      makeAttemptResult({
++        promptError: new Error("overloaded_error"),
++        assistantTexts: [],
++      }),
++    );
++
++    const onBlockReply = vi.fn();
++    const config: OpenClawConfig = {
++      tools: {
++        notifyUserOnApiError: false,
++      },
++      agents: {
++        defaults: {
++          model: {
++            primary: "anthropic/test-model",
++            fallbacks: ["anthropic/test-fallback"],
++          },
++        },
++        list: [
++          {
++            id: "support",
++            tools: {
++              notifyUserOnApiError: true,
++            },
++          },
++        ],
++      },
++    };
++
++    await expect(
++      runEmbeddedPiAgent({
++        sessionId: "test-session",
++        sessionKey: "agent:support:api-notice",
++        sessionFile: "/tmp/session.json",
++        workspaceDir: "/tmp/workspace",
++        prompt: "hello",
++        timeoutMs: 30_000,
++        runId: "run-api-notice",
++        config,
++        onBlockReply,
++        agentId: "support",
++      }),
++    ).rejects.toThrow("overloaded_error");
++
++    await new Promise<void>((resolve) => queueMicrotask(resolve));
++    expect(onBlockReply).toHaveBeenCalledTimes(1);
++    expect(onBlockReply.mock.calls[0]?.[0]?.text).toContain("temporary error");
++  });
++});
+diff --git a/src/agents/pi-embedded-runner.run-embedded-pi-agent.auth-profile-rotation.e2e.test.ts b/src/agents/pi-embedded-runner.run-embedded-pi-agent.auth-profile-rotation.e2e.test.ts
+index cbea9e5f21b9..d49a9408fada 100644
+--- a/src/agents/pi-embedded-runner.run-embedded-pi-agent.auth-profile-rotation.e2e.test.ts
++++ b/src/agents/pi-embedded-runner.run-embedded-pi-agent.auth-profile-rotation.e2e.test.ts
+@@ -1341,4 +1341,101 @@ describe("runEmbeddedPiAgent auth profile rotation", () => {
+       expect(usageStats["openai:p2"]?.cooldownUntil).toBe(now + 60 * 60 * 1000);
+     });
+   });
++
++  it("does not emit an API error notice after an earlier assistant reply in the same run", async () => {
++    await withAgentWorkspace(async ({ agentDir, workspaceDir }) => {
++      await writeAuthStore(agentDir);
++      const onBlockReply = vi.fn();
++
++      runEmbeddedAttemptMock
++        .mockResolvedValueOnce(
++          makeAttempt({
++            assistantTexts: ["partial reply"],
++            lastAssistant: buildAssistant({
++              stopReason: "error",
++              errorMessage: "rate limit",
++            }),
++          }),
++        )
++        .mockResolvedValueOnce(
++          makeAttempt({
++            assistantTexts: [],
++            lastAssistant: buildAssistant({
++              stopReason: "error",
++              errorMessage: "rate limit",
++            }),
++          }),
++        );
++
++      await runEmbeddedPiAgent({
++        sessionId: "session:test",
++        sessionKey: "agent:test:no-api-notice-after-assistant-reply",
++        sessionFile: path.join(workspaceDir, "session.jsonl"),
++        workspaceDir,
++        agentDir,
++        config: makeConfig(),
++        prompt: "hello",
++        provider: "openai",
++        model: "mock-1",
++        authProfileId: "openai:p1",
++        authProfileIdSource: "auto",
++        timeoutMs: 5_000,
++        runId: "run:no-api-notice-after-assistant-reply",
++        onBlockReply,
++      });
++
++      await new Promise<void>((resolve) => queueMicrotask(resolve));
++      expect(runEmbeddedAttemptMock).toHaveBeenCalledTimes(2);
++      expect(onBlockReply).not.toHaveBeenCalled();
++    });
++  });
++
++  it("does not emit an API error notice after an earlier messaging-tool reply in the same run", async () => {
++    await withAgentWorkspace(async ({ agentDir, workspaceDir }) => {
++      await writeAuthStore(agentDir);
++      const onBlockReply = vi.fn();
++
++      runEmbeddedAttemptMock
++        .mockResolvedValueOnce(
++          makeAttempt({
++            didSendViaMessagingTool: true,
++            messagingToolSentTexts: ["sent via channel"],
++            lastAssistant: buildAssistant({
++              stopReason: "error",
++              errorMessage: "rate limit",
++            }),
++          }),
++        )
++        .mockResolvedValueOnce(
++          makeAttempt({
++            assistantTexts: [],
++            lastAssistant: buildAssistant({
++              stopReason: "error",
++              errorMessage: "rate limit",
++            }),
++          }),
++        );
++
++      await runEmbeddedPiAgent({
++        sessionId: "session:test",
++        sessionKey: "agent:test:no-api-notice-after-messaging-reply",
++        sessionFile: path.join(workspaceDir, "session.jsonl"),
++        workspaceDir,
++        agentDir,
++        config: makeConfig(),
++        prompt: "hello",
++        provider: "openai",
++        model: "mock-1",
++        authProfileId: "openai:p1",
++        authProfileIdSource: "auto",
++        timeoutMs: 5_000,
++        runId: "run:no-api-notice-after-messaging-reply",
++        onBlockReply,
++      });
++
++      await new Promise<void>((resolve) => queueMicrotask(resolve));
++      expect(runEmbeddedAttemptMock).toHaveBeenCalledTimes(2);
++      expect(onBlockReply).not.toHaveBeenCalled();
++    });
++  });
+ });
+diff --git a/src/agents/pi-embedded-runner/run.overflow-compaction.harness.ts b/src/agents/pi-embedded-runner/run.overflow-compaction.harness.ts
+index 10c13dfe6fc8..4f0dc2a80b2f 100644
+--- a/src/agents/pi-embedded-runner/run.overflow-compaction.harness.ts
++++ b/src/agents/pi-embedded-runner/run.overflow-compaction.harness.ts
+@@ -120,7 +120,8 @@ export const mockedLog: {
+   isEnabled: vi.fn(() => false),
+ };
+ 
+-export const mockedClassifyFailoverReason = vi.fn(() => null);
++export const mockedClassifyFailoverReason = vi.fn<(raw: string) => string | null>(() => null);
++export const mockedIsFailoverErrorMessage = vi.fn<(raw: string) => boolean>(() => false);
+ export const mockedExtractObservedOverflowTokenCount = vi.fn((msg?: string) => {
+   const match = msg?.match(/prompt is too long:\s*([\d,]+)\s+tokens\s*>\s*[\d,]+\s+maximum/i);
+   return match?.[1] ? Number(match[1].replaceAll(",", "")) : undefined;
+@@ -208,6 +209,8 @@ export function resetRunOverflowCompactionHarnessMocks(): void {
+ 
+   mockedClassifyFailoverReason.mockReset();
+   mockedClassifyFailoverReason.mockReturnValue(null);
++  mockedIsFailoverErrorMessage.mockReset();
++  mockedIsFailoverErrorMessage.mockReturnValue(false);
+   mockedExtractObservedOverflowTokenCount.mockReset();
+   mockedExtractObservedOverflowTokenCount.mockImplementation((msg?: string) => {
+     const match = msg?.match(/prompt is too long:\s*([\d,]+)\s+tokens\s*>\s*[\d,]+\s+maximum/i);
+@@ -294,7 +297,7 @@ export async function loadRunOverflowCompactionHarness(): Promise<{
+     isCompactionFailureError: mockedIsCompactionFailureError,
+     isLikelyContextOverflowError: mockedIsLikelyContextOverflowError,
+     isFailoverAssistantError: vi.fn(() => false),
+-    isFailoverErrorMessage: vi.fn(() => false),
++    isFailoverErrorMessage: mockedIsFailoverErrorMessage,
+     parseImageSizeError: vi.fn(() => null),
+     parseImageDimensionError: vi.fn(() => null),
+     isRateLimitAssistantError: vi.fn(() => false),
+diff --git a/src/agents/pi-embedded-runner/run.ts b/src/agents/pi-embedded-runner/run.ts
+index 044869f00cda..16d9c118082d 100644
+--- a/src/agents/pi-embedded-runner/run.ts
++++ b/src/agents/pi-embedded-runner/run.ts
+@@ -74,6 +74,10 @@ import { runEmbeddedAttempt } from "./run/attempt.js";
+ import { createFailoverDecisionLogger } from "./run/failover-observation.js";
+ import type { RunEmbeddedPiAgentParams } from "./run/params.js";
+ import { buildEmbeddedRunPayloads } from "./run/payloads.js";
++import {
++  buildApiErrorNotice,
++  resolveEffectiveToolOnlyTurnSafetyConfig,
++} from "./tool-only-turn-safety.js";
+ import {
+   truncateOversizedToolResultsInSession,
+   sessionLikelyHasOversizedToolResults,
+@@ -130,6 +134,20 @@ type UsageAccumulator = {
+   lastInput: number;
+ };
+ 
++type UserVisibleReplyAttempt = {
++  assistantTexts: string[];
++  didSendViaMessagingTool: boolean;
++  didSendDeterministicApprovalPrompt?: boolean;
++};
++
++function attemptSentUserVisibleReply(attempt: UserVisibleReplyAttempt): boolean {
++  return (
++    attempt.assistantTexts.length > 0 ||
++    attempt.didSendViaMessagingTool ||
++    attempt.didSendDeterministicApprovalPrompt === true
++  );
++}
++
+ const createUsageAccumulator = (): UsageAccumulator => ({
+   input: 0,
+   output: 0,
+@@ -286,6 +304,19 @@ export async function runEmbeddedPiAgent(
+   return enqueueSession(() =>
+     enqueueGlobal(async () => {
+       const started = Date.now();
++      let hasUserVisibleReply = false;
++      const emitPartialReply = params.onPartialReply
++        ? (...args: Parameters<NonNullable<RunEmbeddedPiAgentParams["onPartialReply"]>>) => {
++            hasUserVisibleReply = true;
++            return params.onPartialReply?.(...args);
++          }
++        : undefined;
++      const emitBlockReply = params.onBlockReply
++        ? (...args: Parameters<NonNullable<RunEmbeddedPiAgentParams["onBlockReply"]>>) => {
++            hasUserVisibleReply = true;
++            return params.onBlockReply?.(...args);
++          }
++        : undefined;
+       const workspaceResolution = resolveRunWorkspaceDir({
+         workspaceDir: params.workspaceDir,
+         sessionKey: params.sessionKey,
+@@ -881,6 +912,41 @@ export async function runEmbeddedPiAgent(
+       // repeated initialization/connection overhead per attempt.
+       ensureContextEnginesInitialized();
+       const contextEngine = await resolveContextEngine(params.config);
++      const toolOnlySafetyConfig = resolveEffectiveToolOnlyTurnSafetyConfig({
++        config: params.config,
++        sessionKey: params.sessionKey,
++        agentId: params.agentId,
++      });
++      // Track whether we've already notified the user about an API error in
++      // this run to avoid spamming multiple notices across retries.
++      let apiErrorNotified = false;
++      /**
++       * If the agent hasn't produced any text reply yet and the config
++       * allows it, emit a brief notice to the user about the API error
++       * so they know the system is still working on their request.
++       */
++      const maybeNotifyUserOfApiError = (errorSummary: string) => {
++        if (apiErrorNotified) {
++          return;
++        }
++        if (!emitBlockReply) {
++          return;
++        }
++        // Only notify when the run hasn't already produced a user-visible reply.
++        if (hasUserVisibleReply) {
++          return;
++        }
++        const notice = buildApiErrorNotice(errorSummary, toolOnlySafetyConfig);
++        if (!notice) {
++          return;
++        }
++        apiErrorNotified = true;
++        void Promise.resolve()
++          .then(() => emitBlockReply({ text: notice }))
++          .catch((err) => {
++            log.warn(`API error user notification failed: ${String(err)}`);
++          });
++      };
+       try {
+         let authRetryPending = false;
+         // Hoisted so the retry-limit error path can use the most recent API total.
+@@ -984,9 +1050,9 @@ export async function runEmbeddedPiAgent(
+             abortSignal: params.abortSignal,
+             shouldEmitToolResult: params.shouldEmitToolResult,
+             shouldEmitToolOutput: params.shouldEmitToolOutput,
+-            onPartialReply: params.onPartialReply,
++            onPartialReply: emitPartialReply,
+             onAssistantMessageStart: params.onAssistantMessageStart,
+-            onBlockReply: params.onBlockReply,
++            onBlockReply: emitBlockReply,
+             onBlockReplyFlush: params.onBlockReplyFlush,
+             blockReplyBreak: params.blockReplyBreak,
+             blockReplyChunking: params.blockReplyChunking,
+@@ -1012,6 +1078,7 @@ export async function runEmbeddedPiAgent(
+             sessionIdUsed,
+             lastAssistant,
+           } = attempt;
++          hasUserVisibleReply ||= attemptSentUserVisibleReply(attempt);
+           bootstrapPromptWarningSignaturesSeen =
+             attempt.bootstrapPromptWarningSignaturesSeen ??
+             (attempt.bootstrapPromptWarningSignature
+@@ -1417,6 +1484,7 @@ export async function runEmbeddedPiAgent(
+               promptFailoverReason !== "timeout" &&
+               (await advanceAuthProfile())
+             ) {
++              maybeNotifyUserOfApiError(promptFailoverReason ?? "service_error");
+               logPromptFailoverDecision("rotate_profile");
+               await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
+               continue;
+@@ -1437,6 +1505,7 @@ export async function runEmbeddedPiAgent(
+             // rate-limit, auth, or billing failures.
+             if (fallbackConfigured && promptFailoverFailure) {
+               const status = resolveFailoverStatus(promptFailoverReason ?? "unknown");
++              maybeNotifyUserOfApiError(promptFailoverReason ?? "service_error");
+               logPromptFailoverDecision("fallback_model", { status });
+               await maybeBackoffBeforeOverloadFailover(promptFailoverReason);
+               throw (
+@@ -1549,12 +1618,14 @@ export async function runEmbeddedPiAgent(
+ 
+             const rotated = await advanceAuthProfile();
+             if (rotated) {
++              maybeNotifyUserOfApiError(assistantFailoverReason ?? "service_error");
+               logAssistantFailoverDecision("rotate_profile");
+               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
+               continue;
+             }
+ 
+             if (fallbackConfigured) {
++              maybeNotifyUserOfApiError(assistantFailoverReason ?? "service_error");
+               await maybeBackoffBeforeOverloadFailover(assistantFailoverReason);
+               // Prefer formatted error message (user-friendly) over raw errorMessage
+               const message =
+diff --git a/src/agents/pi-embedded-runner/tool-only-turn-safety.test.ts b/src/agents/pi-embedded-runner/tool-only-turn-safety.test.ts
+new file mode 100644
+index 000000000000..cfbea611e464
+--- /dev/null
++++ b/src/agents/pi-embedded-runner/tool-only-turn-safety.test.ts
+@@ -0,0 +1,130 @@
++import { describe, expect, it } from "vitest";
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import {
++  buildApiErrorNotice,
++  buildToolOnlyTurnNudgeMessage,
++  DEFAULT_MAX_CONSECUTIVE_TOOL_ONLY_TURNS,
++  DEFAULT_NOTIFY_USER_ON_API_ERROR,
++  resolveEffectiveToolOnlyTurnSafetyConfig,
++  resolveToolOnlyTurnSafetyConfig,
++} from "./tool-only-turn-safety.js";
++
++describe("resolveToolOnlyTurnSafetyConfig", () => {
++  it("returns defaults when no config is provided", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig();
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(DEFAULT_MAX_CONSECUTIVE_TOOL_ONLY_TURNS);
++    expect(cfg.notifyUserOnApiError).toBe(DEFAULT_NOTIFY_USER_ON_API_ERROR);
++  });
++
++  it("returns defaults when config is empty", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig({});
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(15);
++    expect(cfg.notifyUserOnApiError).toBe(true);
++  });
++
++  it("accepts valid overrides", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig({
++      maxConsecutiveToolOnlyTurns: 10,
++      notifyUserOnApiError: false,
++    });
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(10);
++    expect(cfg.notifyUserOnApiError).toBe(false);
++  });
++
++  it("allows 0 to disable tool-only turn safety", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig({ maxConsecutiveToolOnlyTurns: 0 });
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(0);
++  });
++
++  it("falls back to default for negative numbers", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig({ maxConsecutiveToolOnlyTurns: -5 });
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(15);
++  });
++
++  it("falls back to default for non-integer values", () => {
++    const cfg = resolveToolOnlyTurnSafetyConfig({ maxConsecutiveToolOnlyTurns: 3.5 });
++    expect(cfg.maxConsecutiveToolOnlyTurns).toBe(15);
++  });
++});
++
++describe("resolveEffectiveToolOnlyTurnSafetyConfig", () => {
++  const cfg: OpenClawConfig = {
++    tools: {
++      maxConsecutiveToolOnlyTurns: 9,
++      notifyUserOnApiError: false,
++    },
++    agents: {
++      list: [
++        { id: "helper" },
++        {
++          id: "support",
++          tools: {
++            maxConsecutiveToolOnlyTurns: 2,
++            notifyUserOnApiError: true,
++          },
++        },
++      ],
++    },
++  };
++
++  it("uses root tools when the selected agent has no override", () => {
++    expect(resolveEffectiveToolOnlyTurnSafetyConfig({ config: cfg, agentId: "helper" })).toEqual({
++      maxConsecutiveToolOnlyTurns: 9,
++      notifyUserOnApiError: false,
++    });
++  });
++
++  it("lets agent tools override root tools", () => {
++    expect(
++      resolveEffectiveToolOnlyTurnSafetyConfig({
++        config: cfg,
++        sessionKey: "agent:support:session-1",
++      }),
++    ).toEqual({
++      maxConsecutiveToolOnlyTurns: 2,
++      notifyUserOnApiError: true,
++    });
++  });
++});
++
++describe("buildToolOnlyTurnNudgeMessage", () => {
++  it("includes the consecutive turn count", () => {
++    const msg = buildToolOnlyTurnNudgeMessage(15);
++    expect(msg).toContain("15 consecutive tool calls");
++    expect(msg).toContain("reply to the user");
++  });
++
++  it("works with custom counts", () => {
++    const msg = buildToolOnlyTurnNudgeMessage(5);
++    expect(msg).toContain("5 consecutive tool calls");
++  });
++
++  it("asks the agent to summarise and reply", () => {
++    const msg = buildToolOnlyTurnNudgeMessage(10);
++    expect(msg).toContain("summarise your progress");
++    expect(msg).toContain("reply to the user");
++  });
++});
++
++describe("buildApiErrorNotice", () => {
++  it("returns notice with error summary when enabled", () => {
++    const config = resolveToolOnlyTurnSafetyConfig({ notifyUserOnApiError: true });
++    const notice = buildApiErrorNotice("overloaded_error", config);
++    expect(notice).not.toBeNull();
++    expect(notice).toContain("overloaded_error");
++    expect(notice).toContain("Warning:");
++    expect(notice).toContain("retrying automatically");
++  });
++
++  it("returns null when notifyUserOnApiError is disabled", () => {
++    const config = resolveToolOnlyTurnSafetyConfig({ notifyUserOnApiError: false });
++    const notice = buildApiErrorNotice("overloaded_error", config);
++    expect(notice).toBeNull();
++  });
++
++  it("includes the error summary in the message", () => {
++    const config = resolveToolOnlyTurnSafetyConfig();
++    const notice = buildApiErrorNotice("rate_limit_exceeded", config);
++    expect(notice).toContain("rate_limit_exceeded");
++  });
++});
+diff --git a/src/agents/pi-embedded-runner/tool-only-turn-safety.ts b/src/agents/pi-embedded-runner/tool-only-turn-safety.ts
+new file mode 100644
+index 000000000000..9e601e678cbc
+--- /dev/null
++++ b/src/agents/pi-embedded-runner/tool-only-turn-safety.ts
+@@ -0,0 +1,113 @@
++/**
++ * Safety valve for consecutive tool-only assistant turns.
++ *
++ * When the agent produces N consecutive assistant messages that contain only
++ * tool calls (no user-visible text), this module injects a system-level nudge
++ * via `session.steer()` asking the agent to summarise progress and reply to
++ * the user.
++ *
++ * This catches the scenario where loop detection does not fire (each tool call
++ * is different) but the user never receives any response.
++ *
++ * @see https://github.com/openclaw/openclaw/issues/38792
++ */
++
++import type { OpenClawConfig } from "../../config/types.openclaw.js";
++import { createSubsystemLogger } from "../../logging/subsystem.js";
++import { resolveAgentConfig, resolveSessionAgentIds } from "../agent-scope.js";
++
++const log = createSubsystemLogger("agents/tool-only-turn-safety");
++
++/** Resolved runtime config for the safety valve. */
++export type ToolOnlyTurnSafetyConfig = {
++  /** Maximum consecutive tool-only turns before injecting a nudge (0 = disabled). */
++  maxConsecutiveToolOnlyTurns: number;
++  /** Notify the user when an API error occurs and no text reply has been sent yet. */
++  notifyUserOnApiError: boolean;
++};
++
++export const DEFAULT_MAX_CONSECUTIVE_TOOL_ONLY_TURNS = 15;
++export const DEFAULT_NOTIFY_USER_ON_API_ERROR = true;
++
++export function resolveToolOnlyTurnSafetyConfig(cfg?: {
++  maxConsecutiveToolOnlyTurns?: number;
++  notifyUserOnApiError?: boolean;
++}): ToolOnlyTurnSafetyConfig {
++  const maxTurns = cfg?.maxConsecutiveToolOnlyTurns;
++  const notify = cfg?.notifyUserOnApiError;
++  return {
++    maxConsecutiveToolOnlyTurns:
++      typeof maxTurns === "number" && Number.isInteger(maxTurns) && maxTurns >= 0
++        ? maxTurns
++        : DEFAULT_MAX_CONSECUTIVE_TOOL_ONLY_TURNS,
++    notifyUserOnApiError: typeof notify === "boolean" ? notify : DEFAULT_NOTIFY_USER_ON_API_ERROR,
++  };
++}
++
++/**
++ * Resolve the effective runtime safety config from root/default/agent tool scopes.
++ *
++ * Precedence is:
++ * 1. `agents.<id>.tools`
++ * 2. root `tools`
++ */
++export function resolveEffectiveToolOnlyTurnSafetyConfig(params: {
++  config?: OpenClawConfig;
++  sessionKey?: string;
++  agentId?: string;
++}): ToolOnlyTurnSafetyConfig {
++  const cfg = params.config;
++  if (!cfg) {
++    return resolveToolOnlyTurnSafetyConfig();
++  }
++
++  const { sessionAgentId } = resolveSessionAgentIds({
++    config: cfg,
++    sessionKey: params.sessionKey,
++    agentId: params.agentId,
++  });
++  const agentTools = resolveAgentConfig(cfg, sessionAgentId)?.tools;
++  const rootTools = cfg.tools;
++
++  return resolveToolOnlyTurnSafetyConfig({
++    maxConsecutiveToolOnlyTurns:
++      agentTools?.maxConsecutiveToolOnlyTurns ?? rootTools?.maxConsecutiveToolOnlyTurns,
++    notifyUserOnApiError: agentTools?.notifyUserOnApiError ?? rootTools?.notifyUserOnApiError,
++  });
++}
++
++/**
++ * Build a nudge message for tool-only turn safety valve.
++ *
++ * Used by the inline implementation in pi-embedded-subscribe.handlers.messages.ts
++ * when the consecutive tool-only turn threshold is reached.
++ */
++export function buildToolOnlyTurnNudgeMessage(consecutiveToolOnlyTurns: number): string {
++  log.warn(
++    `tool-only turn safety valve triggered: ${consecutiveToolOnlyTurns} consecutive tool-only turns`,
++  );
++  return (
++    `You have completed ${consecutiveToolOnlyTurns} consecutive tool calls without ` +
++    `sending any text reply to the user. Please pause, summarise your progress so far, ` +
++    `and reply to the user before continuing with more tool calls.`
++  );
++}
++
++/**
++ * Build an API-error notification message for the user.
++ *
++ * Used by the inline implementation in run.ts when an API error occurs and
++ * no text reply has been sent yet.
++ */
++export function buildApiErrorNotice(
++  errorSummary: string,
++  config: ToolOnlyTurnSafetyConfig,
++): string | null {
++  if (!config.notifyUserOnApiError) {
++    return null;
++  }
++  return (
++    `Warning: The AI service encountered a temporary error (${errorSummary}). ` +
++    `I'm retrying automatically; please hold on.`
++  );
++}
+diff --git a/src/agents/pi-embedded-subscribe.handlers.messages.ts b/src/agents/pi-embedded-subscribe.handlers.messages.ts
+index 283457ffc0e8..0d1d11adbd53 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.messages.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.messages.ts
+@@ -2,13 +2,19 @@ import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
+ import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+ import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
+ import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
++import type { OpenClawConfig } from "../config/types.openclaw.js";
+ import { emitAgentEvent } from "../infra/agent-events.js";
++import { createSubsystemLogger } from "../logging/subsystem.js";
+ import { createInlineCodeState } from "../markdown/code-spans.js";
+ import {
+   isMessagingToolDuplicateNormalized,
+   normalizeTextForComparison,
+ } from "./pi-embedded-helpers.js";
+ import type { BlockReplyPayload } from "./pi-embedded-payloads.js";
++import {
++  buildToolOnlyTurnNudgeMessage,
++  resolveEffectiveToolOnlyTurnSafetyConfig,
++} from "./pi-embedded-runner/tool-only-turn-safety.js";
+ import type {
+   EmbeddedPiSubscribeContext,
+   EmbeddedPiSubscribeState,
+@@ -23,6 +29,32 @@ import {
+   promoteThinkingTagsToBlocks,
+ } from "./pi-embedded-utils.js";
+ 
++const messageLog = createSubsystemLogger("agent/embedded/messages");
++
++/** Resolve the maxConsecutiveToolOnlyTurns setting from config. */
++function resolveMaxConsecutiveToolOnlyTurns(params: {
++  config?: OpenClawConfig;
++  sessionKey?: string;
++  agentId?: string;
++}): number {
++  return resolveEffectiveToolOnlyTurnSafetyConfig(params).maxConsecutiveToolOnlyTurns;
++}
++
++/** Check whether an assistant message contains any tool-call content blocks. */
++function hasToolCallBlocks(msg: AgentMessage): boolean {
++  const content = (msg as { content?: unknown }).content;
++  if (!Array.isArray(content)) {
++    return false;
++  }
++  return content.some((block: unknown) => {
++    if (!block || typeof block !== "object") {
++      return false;
++    }
++    const type = (block as { type?: unknown }).type;
++    return type === "toolCall" || type === "toolUse" || type === "functionCall";
++  });
++}
++
+ const stripTrailingDirective = (text: string): string => {
+   const openIndex = text.lastIndexOf("[[");
+   if (openIndex < 0) {
+@@ -498,4 +530,46 @@ export function handleMessageEnd(
+   ctx.state.lastStreamedAssistant = undefined;
+   ctx.state.lastStreamedAssistantCleaned = undefined;
+   ctx.state.reasoningStreamOpen = false;
++
++  // ── Tool-only turn safety valve ─────────────────────────────────────────
++  // Track consecutive assistant turns that contain only tool calls and no
++  // user-visible text. When the counter exceeds the configured threshold,
++  // inject a steer message asking the agent to reply to the user.
++  // See: https://github.com/openclaw/openclaw/issues/38792
++  const hasToolCalls = hasToolCallBlocks(assistantMessage);
++  const sentMessagingReplyThisTurn =
++    ctx.state.messagingToolSentTexts.length > ctx.state.messagingToolSentTextBaseline ||
++    ctx.state.messagingToolSentMediaUrls.length > ctx.state.messagingToolSentMediaBaseline;
++  if (cleanedText || hasMedia || sentMessagingReplyThisTurn || ctx.state.visibleOutputEmittedThisTurn) {
++    // This turn produced user-visible output — either directly, via a
++    // messaging tool send, or through visible tool results / reasoning /
++    // voice-only replies — so it should reset the tool-only streak.
++    ctx.state.consecutiveToolOnlyTurns = 0;
++    ctx.state.toolOnlyNudgeInjected = false;
++  } else if (hasToolCalls) {
++    // Some providers can repeat message_end for the same assistant turn.
++    // Count each assistant message at most once for tool-only safety.
++    if (ctx.state.lastCountedToolOnlyMessageIndex === ctx.state.assistantMessageIndex) {
++      return;
++    }
++    ctx.state.lastCountedToolOnlyMessageIndex = ctx.state.assistantMessageIndex;
++    ctx.state.consecutiveToolOnlyTurns++;
++    const threshold = resolveMaxConsecutiveToolOnlyTurns({
++      config: ctx.params.config,
++      sessionKey: ctx.params.sessionKey,
++      agentId: ctx.params.agentId,
++    });
++    if (
++      threshold > 0 &&
++      ctx.state.consecutiveToolOnlyTurns >= threshold &&
++      !ctx.state.toolOnlyNudgeInjected
++    ) {
++      ctx.state.toolOnlyNudgeInjected = true;
++      const nudgeMsg = buildToolOnlyTurnNudgeMessage(ctx.state.consecutiveToolOnlyTurns);
++      // Fire-and-forget steer to avoid blocking the event handler.
++      void ctx.params.session.steer(nudgeMsg).catch((err: unknown) => {
++        messageLog.warn(`tool-only turn nudge steer failed: ${String(err)}`);
++      });
++    }
++  }
+ }
+diff --git a/src/agents/pi-embedded-subscribe.handlers.tools.media.test.ts b/src/agents/pi-embedded-subscribe.handlers.tools.media.test.ts
+index a60986ec48ff..56ac1f0b0def 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.tools.media.test.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.tools.media.test.ts
+@@ -31,6 +31,7 @@ function createMockContext(overrides?: {
+       messagingToolSentMediaUrls: [],
+       messagingToolSentTargets: [],
+       deterministicApprovalPromptSent: false,
++      visibleOutputEmittedThisTurn: false,
+     },
+     log: { debug: vi.fn(), warn: vi.fn() },
+     shouldEmitToolResult: vi.fn(() => false),
+diff --git a/src/agents/pi-embedded-subscribe.handlers.tools.test.ts b/src/agents/pi-embedded-subscribe.handlers.tools.test.ts
+index ec9b52aa6c53..00b041d9e903 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.tools.test.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.tools.test.ts
+@@ -48,6 +48,7 @@ function createTestContext(): {
+       messagingToolSentTargets: [],
+       successfulCronAdds: 0,
+       deterministicApprovalPromptSent: false,
++      visibleOutputEmittedThisTurn: false,
+     },
+     shouldEmitToolResult: () => false,
+     shouldEmitToolOutput: () => false,
+diff --git a/src/agents/pi-embedded-subscribe.handlers.tools.ts b/src/agents/pi-embedded-subscribe.handlers.tools.ts
+index 42f2ea33953f..2c6c12d0ad59 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.tools.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.tools.ts
+@@ -271,6 +271,7 @@ async function emitToolResultOutput(params: {
+         }),
+       );
+       ctx.state.deterministicApprovalPromptSent = true;
++      ctx.state.visibleOutputEmittedThisTurn = true;
+     } catch {
+       // ignore delivery failures
+     }
+@@ -292,6 +293,7 @@ async function emitToolResultOutput(params: {
+         }),
+       );
+       ctx.state.deterministicApprovalPromptSent = true;
++      ctx.state.visibleOutputEmittedThisTurn = true;
+     } catch {
+       // ignore delivery failures
+     }
+@@ -302,6 +304,7 @@ async function emitToolResultOutput(params: {
+     const outputText = extractToolResultText(sanitizedResult);
+     if (outputText) {
+       ctx.emitToolOutput(toolName, meta, outputText);
++      ctx.state.visibleOutputEmittedThisTurn = true;
+     }
+     if (!hasStructuredMedia) {
+       return;
+@@ -320,6 +323,7 @@ async function emitToolResultOutput(params: {
+   if (mediaUrls.length === 0) {
+     return;
+   }
++  ctx.state.visibleOutputEmittedThisTurn = true;
+   queuePendingToolMedia(ctx, {
+     mediaUrls,
+     ...(mediaReply.audioAsVoice ? { audioAsVoice: true } : {}),
+diff --git a/src/agents/pi-embedded-subscribe.handlers.types.ts b/src/agents/pi-embedded-subscribe.handlers.types.ts
+index d7c07cce79ef..3b4fcd96105e 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.types.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.types.ts
+@@ -73,6 +73,8 @@ export type EmbeddedPiSubscribeState = {
+   messagingToolSentTextsNormalized: string[];
+   messagingToolSentTargets: MessagingToolSend[];
+   messagingToolSentMediaUrls: string[];
++  messagingToolSentTextBaseline: number;
++  messagingToolSentMediaBaseline: number;
+   pendingMessagingTexts: Map<string, string>;
+   pendingMessagingTargets: Map<string, MessagingToolSend>;
+   successfulCronAdds: number;
+@@ -81,6 +83,21 @@ export type EmbeddedPiSubscribeState = {
+   pendingToolAudioAsVoice: boolean;
+   deterministicApprovalPromptSent: boolean;
+   lastAssistant?: AgentMessage;
++
++  /** Consecutive assistant turns that contained only tool calls and no text. */
++  consecutiveToolOnlyTurns: number;
++  /** Whether a tool-only turn nudge has been injected for the current streak. */
++  toolOnlyNudgeInjected: boolean;
++  /** Assistant message index already counted for the current tool-only streak. */
++  lastCountedToolOnlyMessageIndex: number;
++  /**
++   * Set to `true` when any visible output has been emitted during the current
++   * assistant turn — via tool result delivery, surfaced reasoning, or
++   * voice-only replies. Checked by the tool-only turn counter to avoid
++   * incrementing the streak when the user actually received progress.
++   * Reset at the start of each new assistant message.
++   */
++  visibleOutputEmittedThisTurn: boolean;
+ };
+ 
+ export type EmbeddedPiSubscribeContext = {
+@@ -163,6 +180,7 @@ export type ToolHandlerState = Pick<
+   | "messagingToolSentTargets"
+   | "successfulCronAdds"
+   | "deterministicApprovalPromptSent"
++  | "visibleOutputEmittedThisTurn"
+ >;
+ 
+ export type ToolHandlerContext = {
+diff --git a/src/agents/pi-embedded-subscribe.tool-only-turn-safety.test.ts b/src/agents/pi-embedded-subscribe.tool-only-turn-safety.test.ts
+new file mode 100644
+index 000000000000..1fe3822ded05
+--- /dev/null
++++ b/src/agents/pi-embedded-subscribe.tool-only-turn-safety.test.ts
+@@ -0,0 +1,104 @@
++import type { AssistantMessage } from "@mariozechner/pi-ai";
++import { describe, expect, it, vi } from "vitest";
++import { createSubscribedSessionHarness } from "./pi-embedded-subscribe.e2e-harness.js";
++
++function createToolOnlyAssistantMessage(toolName: string, toolCallId: string): AssistantMessage {
++  return {
++    role: "assistant",
++    content: [{ type: "toolCall", toolName, toolCallId, args: {} }],
++  } as unknown as AssistantMessage;
++}
++
++describe("subscribeEmbeddedPiSession tool-only safety", () => {
++  it("uses effective agent thresholds and ignores duplicate message_end events", () => {
++    const steer = vi.fn(async () => undefined);
++    const { emit } = createSubscribedSessionHarness({
++      runId: "run",
++      sessionKey: "agent:support:tool-only-threshold",
++      config: {
++        tools: {
++          maxConsecutiveToolOnlyTurns: 99,
++        },
++        agents: {
++          list: [
++            {
++              id: "support",
++              tools: {
++                maxConsecutiveToolOnlyTurns: 2,
++              },
++            },
++          ],
++        },
++      },
++      sessionExtras: { steer },
++    });
++
++    const firstToolOnlyMessage = createToolOnlyAssistantMessage("read", "tool-1");
++    const secondToolOnlyMessage = createToolOnlyAssistantMessage("read", "tool-2");
++
++    emit({ type: "message_start", message: { role: "assistant" } });
++    emit({ type: "message_end", message: firstToolOnlyMessage });
++    emit({ type: "message_end", message: firstToolOnlyMessage });
++
++    expect(steer).not.toHaveBeenCalled();
++
++    emit({ type: "message_start", message: { role: "assistant" } });
++    emit({ type: "message_end", message: secondToolOnlyMessage });
++
++    expect(steer).toHaveBeenCalledTimes(1);
++    expect(steer).toHaveBeenCalledWith(expect.stringContaining("2 consecutive tool calls"));
++  });
++
++  it("resets the tool-only streak after a messaging-tool reply without assistant text", () => {
++    const steer = vi.fn(async () => undefined);
++    const { emit } = createSubscribedSessionHarness({
++      runId: "run",
++      sessionKey: "agent:support:tool-only-threshold",
++      config: {
++        agents: {
++          list: [
++            {
++              id: "support",
++              tools: {
++                maxConsecutiveToolOnlyTurns: 2,
++              },
++            },
++          ],
++        },
++      },
++      sessionExtras: { steer },
++    });
++
++    const messagingToolOnlyMessage = createToolOnlyAssistantMessage("sessions_send", "tool-send");
++    const toolOnlyMessage = createToolOnlyAssistantMessage("read", "tool-read");
++
++    emit({ type: "message_start", message: { role: "assistant" } });
++    emit({
++      type: "tool_execution_start",
++      toolName: "sessions_send",
++      toolCallId: "tool-send",
++      args: { message: "Delivered via messaging tool" },
++    });
++    emit({
++      type: "tool_execution_end",
++      toolName: "sessions_send",
++      toolCallId: "tool-send",
++      isError: false,
++      result: { details: { status: "ok" } },
++    });
++    emit({ type: "message_end", message: messagingToolOnlyMessage });
++
++    emit({ type: "message_start", message: { role: "assistant" } });
++    emit({ type: "message_end", message: toolOnlyMessage });
++    expect(steer).not.toHaveBeenCalled();
++
++    emit({ type: "message_start", message: { role: "assistant" } });
++    emit({
++      type: "message_end",
++      message: createToolOnlyAssistantMessage("read", "tool-read-2"),
++    });
++
++    expect(steer).toHaveBeenCalledTimes(1);
++    expect(steer).toHaveBeenCalledWith(expect.stringContaining("2 consecutive tool calls"));
++  });
++});
+diff --git a/src/agents/pi-embedded-subscribe.ts b/src/agents/pi-embedded-subscribe.ts
+index e2fd18cab702..5dab04813a8f 100644
+--- a/src/agents/pi-embedded-subscribe.ts
++++ b/src/agents/pi-embedded-subscribe.ts
+@@ -76,6 +76,8 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
+     messagingToolSentTextsNormalized: [],
+     messagingToolSentTargets: [],
+     messagingToolSentMediaUrls: [],
++    messagingToolSentTextBaseline: 0,
++    messagingToolSentMediaBaseline: 0,
+     pendingMessagingTexts: new Map(),
+     pendingMessagingTargets: new Map(),
+     successfulCronAdds: 0,
+@@ -83,6 +85,10 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
+     pendingToolMediaUrls: [],
+     pendingToolAudioAsVoice: false,
+     deterministicApprovalPromptSent: false,
++    consecutiveToolOnlyTurns: 0,
++    toolOnlyNudgeInjected: false,
++    lastCountedToolOnlyMessageIndex: -1,
++    visibleOutputEmittedThisTurn: false,
+   };
+   const usageTotals = {
+     input: 0,
+@@ -146,6 +152,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
+     state.lastAssistantTextNormalized = undefined;
+     state.lastAssistantTextTrimmed = undefined;
+     state.assistantTextBaseline = nextAssistantTextBaseline;
++    state.messagingToolSentTextBaseline = messagingToolSentTexts.length;
++    state.messagingToolSentMediaBaseline = messagingToolSentMediaUrls.length;
++    state.visibleOutputEmittedThisTurn = false;
+   };
+ 
+   const rememberAssistantText = (text: string) => {
+@@ -538,6 +547,10 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
+       replyToTag,
+       replyToCurrent,
+     });
++    // Voice-only replies are visible output even without assistant text.
++    if (audioAsVoice) {
++      state.visibleOutputEmittedThisTurn = true;
++    }
+   };
+ 
+   const consumeReplyDirectives = (text: string, options?: { final?: boolean }) =>
+@@ -590,6 +603,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
+     void params.onReasoningStream({
+       text: formatted,
+     });
++    // Visible reasoning surfaced to the user should prevent the tool-only
++    // turn counter from incrementing.
++    state.visibleOutputEmittedThisTurn = true;
+   };
+ 
+   const resetForCompactionRetry = () => {
+diff --git a/src/agents/pi-tool-handler-state.test-helpers.ts b/src/agents/pi-tool-handler-state.test-helpers.ts
+index 7cccdbdf3bf5..b3d716be1538 100644
+--- a/src/agents/pi-tool-handler-state.test-helpers.ts
++++ b/src/agents/pi-tool-handler-state.test-helpers.ts
+@@ -13,6 +13,7 @@ export function createBaseToolHandlerState() {
+     messagingToolSentMediaUrls: [] as string[],
+     messagingToolSentTargets: [] as unknown[],
+     deterministicApprovalPromptSent: false,
++    visibleOutputEmittedThisTurn: false,
+     blockBuffer: "",
+   };
+ }
+diff --git a/src/config/schema.base.generated.ts b/src/config/schema.base.generated.ts
+index bddd0f2e3e29..999685063517 100644
+--- a/src/config/schema.base.generated.ts
++++ b/src/config/schema.base.generated.ts
+@@ -4654,6 +4654,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
+                         additionalProperties: false,
+                       },
+                     },
++                    maxConsecutiveToolOnlyTurns: {
++                      type: "integer",
++                      minimum: 0,
++                      maximum: 9007199254740991,
++                    },
++                    notifyUserOnApiError: {
++                      type: "boolean",
++                    },
+                     elevated: {
+                       type: "object",
+                       properties: {
+@@ -5032,6 +5040,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA = {
+               additionalProperties: false,
+             },
+           },
++          maxConsecutiveToolOnlyTurns: {
++            type: "integer",
++            minimum: 0,
++            maximum: 9007199254740991,
++          },
++          notifyUserOnApiError: {
++            type: "boolean",
++          },
+           web: {
+             type: "object",
+             properties: {
+diff --git a/src/config/types.tools.ts b/src/config/types.tools.ts
+index fb95c3ac64f5..1ccea51e84fc 100644
+--- a/src/config/types.tools.ts
++++ b/src/config/types.tools.ts
+@@ -296,6 +296,17 @@ export type AgentToolsConfig = {
+   deny?: string[];
+   /** Optional tool policy overrides keyed by provider id or "provider/model". */
+   byProvider?: Record<string, ToolPolicyConfig>;
++  /**
++   * Maximum consecutive assistant turns that contain only tool calls and no
++   * user-visible text before injecting a system nudge asking the agent to
++   * reply. 0 disables the safety valve. Default: 15.
++   */
++  maxConsecutiveToolOnlyTurns?: number;
++  /**
++   * When an API error occurs and the agent has not yet sent any text reply,
++   * notify the user with a brief status message. Default: true.
++   */
++  notifyUserOnApiError?: boolean;
+   /** Per-agent elevated exec gate (can only further restrict global tools.elevated). */
+   elevated?: {
+     /** Enable or disable elevated mode for this agent (default: true). */
+@@ -589,6 +600,18 @@ export type ToolsConfig = {
+   fs?: FsToolsConfig;
+   /** Runtime loop detection for repetitive/ stuck tool-call patterns. */
+   loopDetection?: ToolLoopDetectionConfig;
++  /**
++   * Maximum consecutive assistant turns that contain only tool calls and no
++   * user-visible text before injecting a system nudge asking the agent to
++   * reply. 0 disables the safety valve. Default: 15.
++   */
++  maxConsecutiveToolOnlyTurns?: number;
++  /**
++   * When an API error (e.g. overloaded_error) occurs and the agent has not
++   * yet sent any text reply, notify the user with a brief status message.
++   * Default: true.
++   */
++  notifyUserOnApiError?: boolean;
+   /** Sub-agent tool policy defaults (deny wins). */
+   subagents?: {
+     /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index 722c5ec9bafd..ce2745ee040d 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -557,6 +557,8 @@ const CommonToolPolicyFields = {
+ export const AgentToolsSchema = z
+   .object({
+     ...CommonToolPolicyFields,
++    maxConsecutiveToolOnlyTurns: z.number().int().min(0).optional(),
++    notifyUserOnApiError: z.boolean().optional(),
+     elevated: z
+       .object({
+         enabled: z.boolean().optional(),
+@@ -807,6 +809,8 @@ export const AgentEntrySchema = z
+ export const ToolsSchema = z
+   .object({
+     ...CommonToolPolicyFields,
++    maxConsecutiveToolOnlyTurns: z.number().int().min(0).optional(),
++    notifyUserOnApiError: z.boolean().optional(),
+     web: ToolsWebSchema,
+     media: ToolsMediaSchema,
+     links: ToolsLinksSchema,

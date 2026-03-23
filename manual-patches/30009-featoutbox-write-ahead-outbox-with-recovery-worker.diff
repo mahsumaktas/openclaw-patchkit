@@ -1,0 +1,2315 @@
+diff --git a/src/auto-reply/dispatch.ts b/src/auto-reply/dispatch.ts
+index 95d1d9c34b31..d4039484f138 100644
+--- a/src/auto-reply/dispatch.ts
++++ b/src/auto-reply/dispatch.ts
+@@ -1,10 +1,12 @@
+ import type { OpenClawConfig } from "../config/config.js";
++import { isDeliverableMessageChannel, normalizeMessageChannel } from "../utils/message-channel.js";
+ import type { DispatchFromConfigResult } from "./reply/dispatch-from-config.js";
+ import { dispatchReplyFromConfig } from "./reply/dispatch-from-config.js";
+ import { finalizeInboundContext } from "./reply/inbound-context.js";
+ import {
+   createReplyDispatcher,
+   createReplyDispatcherWithTyping,
++  type DeliveryQueueContext,
+   type ReplyDispatcher,
+   type ReplyDispatcherOptions,
+   type ReplyDispatcherWithTypingOptions,
+@@ -22,7 +24,6 @@ export async function withReplyDispatcher<T>(params: {
+   try {
+     return await params.run();
+   } finally {
+-    // Ensure dispatcher reservations are always released on every exit path.
+     params.dispatcher.markComplete();
+     try {
+       await params.dispatcher.waitForIdle();
+@@ -32,27 +33,80 @@ export async function withReplyDispatcher<T>(params: {
+   }
+ }
+ 
+-export async function dispatchInboundMessage(params: {
++type DispatchInboundMessageInternalParams = {
+   ctx: MsgContext | FinalizedMsgContext;
+   cfg: OpenClawConfig;
+   dispatcher: ReplyDispatcher;
+   replyOptions?: Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
+   replyResolver?: typeof import("./reply.js").getReplyFromConfig;
+-}): Promise<DispatchInboundResult> {
+-  const finalized = finalizeInboundContext(params.ctx);
++};
++
++function resolveDeliveryQueueContext(params: {
++  ctx: FinalizedMsgContext;
++}): DeliveryQueueContext | undefined {
++  const channel = normalizeMessageChannel(
++    params.ctx.OriginatingChannel ?? params.ctx.Surface ?? params.ctx.Provider,
++  );
++  if (!channel || !isDeliverableMessageChannel(channel)) {
++    return undefined;
++  }
++  const to = params.ctx.OriginatingTo?.trim() || params.ctx.To?.trim();
++  if (!to) {
++    return undefined;
++  }
++  return {
++    channel,
++    to,
++    accountId: params.ctx.AccountId?.trim() || undefined,
++    threadId: params.ctx.MessageThreadId,
++    replyToId: params.ctx.ReplyToId?.trim() || undefined,
++    turnId: params.ctx.MessageTurnId,
++  };
++}
++
++async function dispatchInboundMessageInternal({
++  ctx,
++  cfg,
++  dispatcher,
++  replyOptions,
++  replyResolver,
++}: DispatchInboundMessageInternalParams): Promise<DispatchInboundResult> {
++  const finalized = finalizeInboundContext(ctx);
++
++  // Interaction-scoped dispatchers (Slack slash /openclaw, Discord native commands)
++  // use one-time callbacks (respond(), interaction.reply()) that cannot survive
++  // recovery. Skip outbox tracking for these to avoid replaying content to the
++  // wrong destination (e.g. DM fallback when the original callback has expired).
++  const isInteractionScoped = finalized.CommandSource === "native";
++
++  if (dispatcher.setDeliveryQueueContext && !isInteractionScoped) {
++    const queueContext = resolveDeliveryQueueContext({ ctx: finalized });
++    dispatcher.setDeliveryQueueContext(queueContext);
++  }
++
+   return await withReplyDispatcher({
+-    dispatcher: params.dispatcher,
++    dispatcher,
+     run: () =>
+       dispatchReplyFromConfig({
+         ctx: finalized,
+-        cfg: params.cfg,
+-        dispatcher: params.dispatcher,
+-        replyOptions: params.replyOptions,
+-        replyResolver: params.replyResolver,
++        cfg,
++        dispatcher,
++        replyOptions,
++        replyResolver,
+       }),
+   });
+ }
+ 
++export async function dispatchInboundMessage(params: {
++  ctx: MsgContext | FinalizedMsgContext;
++  cfg: OpenClawConfig;
++  dispatcher: ReplyDispatcher;
++  replyOptions?: Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
++  replyResolver?: typeof import("./reply.js").getReplyFromConfig;
++}): Promise<DispatchInboundResult> {
++  return dispatchInboundMessageInternal(params);
++}
++
+ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
+   ctx: MsgContext | FinalizedMsgContext;
+   cfg: OpenClawConfig;
+@@ -64,7 +118,7 @@ export async function dispatchInboundMessageWithBufferedDispatcher(params: {
+     params.dispatcherOptions,
+   );
+   try {
+-    return await dispatchInboundMessage({
++    return await dispatchInboundMessageInternal({
+       ctx: params.ctx,
+       cfg: params.cfg,
+       dispatcher,
+@@ -87,7 +141,7 @@ export async function dispatchInboundMessageWithDispatcher(params: {
+   replyResolver?: typeof import("./reply.js").getReplyFromConfig;
+ }): Promise<DispatchInboundResult> {
+   const dispatcher = createReplyDispatcher(params.dispatcherOptions);
+-  return await dispatchInboundMessage({
++  return await dispatchInboundMessageInternal({
+     ctx: params.ctx,
+     cfg: params.cfg,
+     dispatcher,
+diff --git a/src/auto-reply/reply/commands-core.ts b/src/auto-reply/reply/commands-core.ts
+index d57d679fdb60..9ad27497b511 100644
+--- a/src/auto-reply/reply/commands-core.ts
++++ b/src/auto-reply/reply/commands-core.ts
+@@ -86,6 +86,7 @@ export async function emitResetCommandHooks(params: {
+         accountId: params.ctx.AccountId,
+         threadId: params.ctx.MessageThreadId,
+         cfg: params.cfg,
++        kind: "final",
+       });
+     }
+   }
+diff --git a/src/auto-reply/reply/dispatch-acp-delivery.ts b/src/auto-reply/reply/dispatch-acp-delivery.ts
+index 6624f9868a2f..6361fb40c66e 100644
+--- a/src/auto-reply/reply/dispatch-acp-delivery.ts
++++ b/src/auto-reply/reply/dispatch-acp-delivery.ts
+@@ -157,6 +157,7 @@ export function createAcpDispatchDeliveryCoordinator(params: {
+         accountId: params.ctx.AccountId,
+         threadId: params.ctx.MessageThreadId,
+         cfg: params.cfg,
++        kind,
+       });
+       if (!result.ok) {
+         logVerbose(
+diff --git a/src/auto-reply/reply/dispatch-acp.ts b/src/auto-reply/reply/dispatch-acp.ts
+index 33990cb20d69..3871a791d65e 100644
+--- a/src/auto-reply/reply/dispatch-acp.ts
++++ b/src/auto-reply/reply/dispatch-acp.ts
+@@ -140,6 +140,7 @@ function hasBoundConversationForSession(params: {
+ 
+ export type AcpDispatchAttemptResult = {
+   queuedFinal: boolean;
++  attemptedFinal?: number;
+   counts: Record<ReplyDispatchKind, number>;
+ };
+ 
+@@ -175,6 +176,7 @@ export async function tryDispatchAcpReply(params: {
+   }
+ 
+   let queuedFinal = false;
++  let attemptedFinal = 0;
+   const delivery = createAcpDispatchDeliveryCoordinator({
+     cfg: params.cfg,
+     ctx: params.ctx,
+@@ -194,7 +196,7 @@ export async function tryDispatchAcpReply(params: {
+     delivery.applyRoutedCounts(counts);
+     params.recordProcessed("completed", { reason: "acp_empty_prompt" });
+     params.markIdle("message_completed");
+-    return { queuedFinal: false, counts };
++    return { queuedFinal: false, attemptedFinal: 0, counts };
+   }
+ 
+   const identityPendingBeforeTurn = isSessionIdentityPending(
+@@ -311,7 +313,7 @@ export async function tryDispatchAcpReply(params: {
+     );
+     params.recordProcessed("completed", { reason: "acp_dispatch" });
+     params.markIdle("message_completed");
+-    return { queuedFinal, counts };
++    return { queuedFinal, attemptedFinal, counts };
+   } catch (err) {
+     await projector.flush(true);
+     const acpError = toAcpRuntimeError({
+@@ -334,6 +336,6 @@ export async function tryDispatchAcpReply(params: {
+       reason: `acp_error:${acpError.code.toLowerCase()}`,
+     });
+     params.markIdle("message_completed");
+-    return { queuedFinal, counts };
++    return { queuedFinal, attemptedFinal, counts };
+   }
+ }
+diff --git a/src/auto-reply/reply/dispatch-from-config.ts b/src/auto-reply/reply/dispatch-from-config.ts
+index 1a968581cf61..a496f81e7287 100644
+--- a/src/auto-reply/reply/dispatch-from-config.ts
++++ b/src/auto-reply/reply/dispatch-from-config.ts
+@@ -95,6 +95,7 @@ const resolveSessionStoreEntry = (
+ 
+ export type DispatchFromConfigResult = {
+   queuedFinal: boolean;
++  attemptedFinal?: number;
+   counts: Record<ReplyDispatchKind, number>;
+ };
+ 
+@@ -161,7 +162,7 @@ export async function dispatchReplyFromConfig(params: {
+ 
+   if (shouldSkipDuplicateInbound(ctx)) {
+     recordProcessed("skipped", { reason: "duplicate" });
+-    return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
++    return { queuedFinal: false, attemptedFinal: 0, counts: dispatcher.getQueuedCounts() };
+   }
+ 
+   const sessionStoreEntry = resolveSessionStoreEntry(ctx, cfg);
+@@ -232,6 +233,7 @@ export async function dispatchReplyFromConfig(params: {
+     payload: ReplyPayload,
+     abortSignal?: AbortSignal,
+     mirror?: boolean,
++    kind?: "tool" | "block" | "final",
+   ): Promise<void> => {
+     // TypeScript doesn't narrow these from the shouldRouteToOriginating check,
+     // but they're guaranteed non-null when this function is called.
+@@ -245,6 +247,7 @@ export async function dispatchReplyFromConfig(params: {
+       payload,
+       channel: originatingChannel,
+       to: originatingTo,
++      turnId: ctx.MessageTurnId,
+       sessionKey: ctx.SessionKey,
+       accountId: ctx.AccountId,
+       threadId: ctx.MessageThreadId,
+@@ -253,6 +256,7 @@ export async function dispatchReplyFromConfig(params: {
+       mirror,
+       isGroup,
+       groupId,
++      kind,
+     });
+     if (!result.ok) {
+       logVerbose(`dispatch-from-config: route-reply failed: ${result.error ?? "unknown error"}`);
+@@ -269,35 +273,39 @@ export async function dispatchReplyFromConfig(params: {
+       } satisfies ReplyPayload;
+       let queuedFinal = false;
+       let routedFinalCount = 0;
++      let attemptedFinal = 0;
+       if (shouldRouteToOriginating && originatingChannel && originatingTo) {
++        attemptedFinal += 1;
+         const result = await routeReply({
+           payload,
+           channel: originatingChannel,
+           to: originatingTo,
++          turnId: ctx.MessageTurnId,
+           sessionKey: ctx.SessionKey,
+           accountId: ctx.AccountId,
+           threadId: ctx.MessageThreadId,
+           cfg,
+           isGroup,
+           groupId,
++          kind: "final",
+         });
+         queuedFinal = result.ok;
+         if (result.ok) {
+           routedFinalCount += 1;
+-        }
+-        if (!result.ok) {
++        } else {
+           logVerbose(
+             `dispatch-from-config: route-reply (abort) failed: ${result.error ?? "unknown error"}`,
+           );
+         }
+       } else {
++        attemptedFinal += 1;
+         queuedFinal = dispatcher.sendFinalReply(payload);
+       }
+       const counts = dispatcher.getQueuedCounts();
+       counts.final += routedFinalCount;
+       recordProcessed("completed", { reason: "fast_abort" });
+       markIdle("message_completed");
+-      return { queuedFinal, counts };
++      return { queuedFinal, attemptedFinal, counts };
+     }
+ 
+     const bypassAcpForCommand = shouldBypassAcpDispatchForCommand(ctx, cfg);
+@@ -321,7 +329,7 @@ export async function dispatchReplyFromConfig(params: {
+       const counts = dispatcher.getQueuedCounts();
+       recordProcessed("completed", { reason: "send_policy_deny" });
+       markIdle("message_completed");
+-      return { queuedFinal: false, counts };
++      return { queuedFinal: false, attemptedFinal: 0, counts };
+     }
+ 
+     const shouldSendToolSummaries = ctx.ChatType !== "group" && ctx.CommandSource !== "native";
+@@ -392,7 +400,7 @@ export async function dispatchReplyFromConfig(params: {
+               return;
+             }
+             if (shouldRouteToOriginating) {
+-              await sendPayloadAsync(deliveryPayload, undefined, false);
++              await sendPayloadAsync(deliveryPayload, undefined, false, "tool");
+             } else {
+               dispatcher.sendToolResult(deliveryPayload);
+             }
+@@ -424,7 +432,7 @@ export async function dispatchReplyFromConfig(params: {
+               ttsAuto: sessionTtsAuto,
+             });
+             if (shouldRouteToOriginating) {
+-              await sendPayloadAsync(ttsPayload, context?.abortSignal, false);
++              await sendPayloadAsync(ttsPayload, context?.abortSignal, false, "block");
+             } else {
+               dispatcher.sendBlockReply(ttsPayload);
+             }
+@@ -465,6 +473,7 @@ export async function dispatchReplyFromConfig(params: {
+ 
+     let queuedFinal = false;
+     let routedFinalCount = 0;
++    let attemptedFinal = 0;
+     for (const reply of replies) {
+       // Suppress reasoning payloads from channel delivery — channels using this
+       // generic dispatch path do not have a dedicated reasoning lane.
+@@ -480,17 +489,20 @@ export async function dispatchReplyFromConfig(params: {
+         ttsAuto: sessionTtsAuto,
+       });
+       if (shouldRouteToOriginating && originatingChannel && originatingTo) {
++        attemptedFinal += 1;
+         // Route final reply to originating channel.
+         const result = await routeReply({
+           payload: ttsReply,
+           channel: originatingChannel,
+           to: originatingTo,
++          turnId: ctx.MessageTurnId,
+           sessionKey: ctx.SessionKey,
+           accountId: ctx.AccountId,
+           threadId: ctx.MessageThreadId,
+           cfg,
+           isGroup,
+           groupId,
++          kind: "final",
+         });
+         if (!result.ok) {
+           logVerbose(
+@@ -502,6 +514,7 @@ export async function dispatchReplyFromConfig(params: {
+           routedFinalCount += 1;
+         }
+       } else {
++        attemptedFinal += 1;
+         queuedFinal = dispatcher.sendFinalReply(ttsReply) || queuedFinal;
+       }
+     }
+@@ -533,27 +546,30 @@ export async function dispatchReplyFromConfig(params: {
+             audioAsVoice: ttsSyntheticReply.audioAsVoice,
+           };
+           if (shouldRouteToOriginating && originatingChannel && originatingTo) {
++            attemptedFinal += 1;
+             const result = await routeReply({
+               payload: ttsOnlyPayload,
+               channel: originatingChannel,
+               to: originatingTo,
++              turnId: ctx.MessageTurnId,
+               sessionKey: ctx.SessionKey,
+               accountId: ctx.AccountId,
+               threadId: ctx.MessageThreadId,
+               cfg,
+               isGroup,
+               groupId,
++              kind: "final",
+             });
+             queuedFinal = result.ok || queuedFinal;
+             if (result.ok) {
+               routedFinalCount += 1;
+-            }
+-            if (!result.ok) {
++            } else {
+               logVerbose(
+                 `dispatch-from-config: route-reply (tts-only) failed: ${result.error ?? "unknown error"}`,
+               );
+             }
+           } else {
++            attemptedFinal += 1;
+             const didQueue = dispatcher.sendFinalReply(ttsOnlyPayload);
+             queuedFinal = didQueue || queuedFinal;
+           }
+@@ -569,7 +585,7 @@ export async function dispatchReplyFromConfig(params: {
+     counts.final += routedFinalCount;
+     recordProcessed("completed");
+     markIdle("message_completed");
+-    return { queuedFinal, counts };
++    return { queuedFinal, attemptedFinal, counts };
+   } catch (err) {
+     recordProcessed("error", { error: String(err) });
+     markIdle("message_error");
+diff --git a/src/auto-reply/reply/followup-runner.ts b/src/auto-reply/reply/followup-runner.ts
+index 0d796f37dae7..af0477b2627c 100644
+--- a/src/auto-reply/reply/followup-runner.ts
++++ b/src/auto-reply/reply/followup-runner.ts
+@@ -102,6 +102,7 @@ export function createFollowupRunner(params: {
+           accountId: queued.originatingAccountId,
+           threadId: queued.originatingThreadId,
+           cfg: queued.run.config,
++          kind: "final",
+         });
+         if (!result.ok) {
+           const errorMsg = result.error ?? "unknown error";
+diff --git a/src/auto-reply/reply/get-reply-run.ts b/src/auto-reply/reply/get-reply-run.ts
+index 704688ddf6dc..55d44a8e6eb6 100644
+--- a/src/auto-reply/reply/get-reply-run.ts
++++ b/src/auto-reply/reply/get-reply-run.ts
+@@ -120,6 +120,7 @@ async function sendResetSessionNotice(params: {
+     accountId: params.accountId,
+     threadId: params.threadId,
+     cfg: params.cfg,
++    kind: "final",
+   });
+ }
+ 
+diff --git a/src/auto-reply/reply/reply-dispatcher.ts b/src/auto-reply/reply/reply-dispatcher.ts
+index 7272a3081a28..e01aa7ccbfa2 100644
+--- a/src/auto-reply/reply/reply-dispatcher.ts
++++ b/src/auto-reply/reply/reply-dispatcher.ts
+@@ -1,6 +1,8 @@
+ import type { TypingCallbacks } from "../../channels/typing.js";
+ import type { HumanDelayConfig } from "../../config/types.js";
++import { ackDelivery, enqueueDelivery, failDelivery } from "../../infra/outbound/delivery-queue.js";
+ import { sleep } from "../../utils.js";
++import type { DeliverableMessageChannel } from "../../utils/message-channel.js";
+ import type { GetReplyOptions, ReplyPayload } from "../types.js";
+ import { registerDispatcher } from "./dispatcher-registry.js";
+ import { normalizeReplyPayload, type NormalizeReplySkipReason } from "./normalize-reply.js";
+@@ -9,6 +11,22 @@ import type { TypingController } from "./typing.js";
+ 
+ export type ReplyDispatchKind = "tool" | "block" | "final";
+ 
++export type DeliveryQueueContext = {
++  channel: DeliverableMessageChannel;
++  to: string;
++  turnId?: string;
++  accountId?: string;
++  threadId?: string | number | null;
++  replyToId?: string | null;
++  bestEffort?: boolean;
++  gifPlayback?: boolean;
++  silent?: boolean;
++};
++
++export type ReplyDeliveryStats = {
++  successfulSends: number;
++};
++
+ type ReplyDispatchErrorHandler = (err: unknown, info: { kind: ReplyDispatchKind }) => void;
+ 
+ type ReplyDispatchSkipHandler = (
+@@ -77,6 +95,8 @@ export type ReplyDispatcher = {
+   sendToolResult: (payload: ReplyPayload) => boolean;
+   sendBlockReply: (payload: ReplyPayload) => boolean;
+   sendFinalReply: (payload: ReplyPayload) => boolean;
++  setDeliveryQueueContext?: (context: DeliveryQueueContext | undefined) => void;
++  getDeliveryStats?: () => ReplyDeliveryStats;
+   waitForIdle: () => Promise<void>;
+   getQueuedCounts: () => Record<ReplyDispatchKind, number>;
+   markComplete: () => void;
+@@ -119,6 +139,8 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
+     block: 0,
+     final: 0,
+   };
++  let deliveryQueueContext: DeliveryQueueContext | undefined;
++  let successfulSends = 0;
+ 
+   // Register this dispatcher globally for gateway restart coordination.
+   const { unregister } = registerDispatcher({
+@@ -155,9 +177,37 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
+             await sleep(delayMs);
+           }
+         }
+-        // Safe: deliver is called inside an async .then() callback, so even a synchronous
+-        // throw becomes a rejection that flows through .catch()/.finally(), ensuring cleanup.
+-        await options.deliver(normalized, { kind });
++        let queueId: string | null = null;
++        if (deliveryQueueContext) {
++          queueId = await enqueueDelivery({
++            channel: deliveryQueueContext.channel,
++            to: deliveryQueueContext.to,
++            accountId: deliveryQueueContext.accountId,
++            payloads: [normalized],
++            threadId: deliveryQueueContext.threadId,
++            replyToId: normalized.replyToId ?? deliveryQueueContext.replyToId,
++            bestEffort: deliveryQueueContext.bestEffort,
++            gifPlayback: deliveryQueueContext.gifPlayback,
++            silent: deliveryQueueContext.silent,
++            turnId: deliveryQueueContext.turnId,
++            dispatchKind: kind,
++          }).catch(() => null);
++        }
++        try {
++          // Safe: deliver is called inside an async .then() callback, so even a synchronous
++          // throw becomes a rejection that flows through .catch()/.finally(), ensuring cleanup.
++          await options.deliver(normalized, { kind });
++          successfulSends += 1;
++          if (queueId) {
++            await ackDelivery(queueId).catch(() => {});
++          }
++        } catch (err) {
++          if (queueId) {
++            const message = err instanceof Error ? err.message : String(err);
++            await failDelivery(queueId, message).catch(() => {});
++          }
++          throw err;
++        }
+       })
+       .catch((err) => {
+         options.onError?.(err, { kind });
+@@ -204,6 +254,10 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
+     sendToolResult: (payload) => enqueue("tool", payload),
+     sendBlockReply: (payload) => enqueue("block", payload),
+     sendFinalReply: (payload) => enqueue("final", payload),
++    setDeliveryQueueContext: (context) => {
++      deliveryQueueContext = context;
++    },
++    getDeliveryStats: () => ({ successfulSends }),
+     waitForIdle: () => sendChain,
+     getQueuedCounts: () => ({ ...queuedCounts }),
+     markComplete,
+diff --git a/src/auto-reply/reply/route-reply.ts b/src/auto-reply/reply/route-reply.ts
+index a489bedcbbf5..644e4cac74cf 100644
+--- a/src/auto-reply/reply/route-reply.ts
++++ b/src/auto-reply/reply/route-reply.ts
+@@ -36,6 +36,8 @@ export type RouteReplyParams = {
+   to: string;
+   /** Session key for deriving agent identity defaults (multi-agent). */
+   sessionKey?: string;
++  /** Optional durable turn id for outbox-linking and restart-safe recovery. */
++  turnId?: string;
+   /** Provider account id (multi-account). */
+   accountId?: string;
+   /** Thread id for replies (Telegram topic id or Matrix thread event id). */
+@@ -50,6 +52,8 @@ export type RouteReplyParams = {
+   isGroup?: boolean;
+   /** Group or channel identifier for correlation with received events */
+   groupId?: string;
++  /** Dispatch kind for outbox tracking and recovery filtering. */
++  kind?: "tool" | "block" | "final";
+ };
+ 
+ export type RouteReplyResult = {
+@@ -146,11 +150,13 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
+       channel: channelId,
+       to,
+       accountId: accountId ?? undefined,
++      turnId: params.turnId,
+       payloads: [normalized],
+       replyToId: resolvedReplyToId ?? null,
+       threadId: resolvedThreadId,
+       session: outboundSession,
+       abortSignal,
++      dispatchKind: params.kind,
+       mirror:
+         params.mirror !== false && params.sessionKey
+           ? {
+diff --git a/src/auto-reply/templating.ts b/src/auto-reply/templating.ts
+index c0ab459bfe9d..93de549e106f 100644
+--- a/src/auto-reply/templating.ts
++++ b/src/auto-reply/templating.ts
+@@ -50,6 +50,8 @@ export type MsgContext = {
+   MessageSid?: string;
+   /** Provider-specific full message id when MessageSid is a shortened alias. */
+   MessageSidFull?: string;
++  /** Durable message-turn id used by lifecycle recovery and outbox linking. */
++  MessageTurnId?: string;
+   MessageSids?: string[];
+   MessageSidFirst?: string;
+   MessageSidLast?: string;
+diff --git a/src/channels/plugins/types.adapters.ts b/src/channels/plugins/types.adapters.ts
+index f31f3b20284a..00413c0165a1 100644
+--- a/src/channels/plugins/types.adapters.ts
++++ b/src/channels/plugins/types.adapters.ts
+@@ -98,6 +98,16 @@ export type ChannelOutboundContext = {
+   identity?: OutboundIdentity;
+   deps?: OutboundSendDeps;
+   silent?: boolean;
++  /** Delivery metadata (idempotency key, turn id) injected by the outbound pipeline. */
++  delivery?: ChannelOutboundDeliveryMetadata;
++};
++
++/** Metadata attached to outbound context for delivery tracking. */
++export type ChannelOutboundDeliveryMetadata = {
++  /** Idempotency key for dedup on the channel provider side. */
++  idempotencyKey?: string;
++  /** Durable turn id for outbox/recovery linking. */
++  turnId?: string;
+ };
+ 
+ export type ChannelOutboundPayloadContext = ChannelOutboundContext & {
+@@ -110,6 +120,8 @@ export type ChannelOutboundAdapter = {
+   chunkerMode?: "text" | "markdown";
+   textChunkLimit?: number;
+   pollMaxOptions?: number;
++  /** Whether the channel adapter supports idempotency keys for dedup. */
++  supportsIdempotencyKey?: boolean;
+   resolveTarget?: (params: {
+     cfg?: OpenClawConfig;
+     to?: string;
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index 5b9fda17424d..3d842d4218e2 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -1398,6 +1398,12 @@ export const FIELD_HELP: Record<string, string> = {
+     "Override default status reaction emojis. Keys: thinking, tool, coding, web, done, error, stallSoft, stallHard. Must be valid Telegram reaction emojis.",
+   "messages.statusReactions.timing":
+     "Override default timing. Keys: debounceMs (700), stallSoftMs (25000), stallHardMs (60000), doneHoldMs (1500), errorHoldMs (2500).",
++  "messages.delivery":
++    "Durable outbound delivery lifecycle settings including queue expiry behavior and terminalization policy.",
++  "messages.delivery.maxAgeMs":
++    "Maximum queued age in milliseconds before pending deliveries expire. Default is 1800000 (30 minutes).",
++  "messages.delivery.expireAction":
++    'Expiry action for stale queued deliveries: "fail" marks terminal failure (default), "deliver" allows stale delivery attempts.',
+   "messages.inbound.debounceMs":
+     "Debounce window (ms) for batching rapid inbound messages from the same sender (0 to disable).",
+   "channels.telegram.dmPolicy":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 797b7f8ba676..78fa3f689379 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -649,6 +649,9 @@ export const FIELD_LABELS: Record<string, string> = {
+   "messages.statusReactions.enabled": "Enable Status Reactions",
+   "messages.statusReactions.emojis": "Status Reaction Emojis",
+   "messages.statusReactions.timing": "Status Reaction Timing",
++  "messages.delivery": "Delivery Lifecycle",
++  "messages.delivery.maxAgeMs": "Delivery Max Age (ms)",
++  "messages.delivery.expireAction": "Delivery Expiry Action",
+   "messages.inbound.debounceMs": "Inbound Message Debounce (ms)",
+   "messages.inbound.byChannel": "Inbound Debounce by Channel (ms)",
+   "messages.tts": "Message Text-to-Speech",
+diff --git a/src/config/types.messages.ts b/src/config/types.messages.ts
+index 39a5ca7da699..84213732762b 100644
+--- a/src/config/types.messages.ts
++++ b/src/config/types.messages.ts
+@@ -82,6 +82,15 @@ export type StatusReactionsConfig = {
+   timing?: StatusReactionsTimingConfig;
+ };
+ 
++export type MessagesDeliveryExpireAction = "fail" | "deliver";
++
++export type MessagesDeliveryConfig = {
++  /** Maximum queue age in milliseconds before pending deliveries are considered expired. */
++  maxAgeMs?: number;
++  /** Action taken when a queued delivery exceeds maxAgeMs (default: "fail"). */
++  expireAction?: MessagesDeliveryExpireAction;
++};
++
+ export type MessagesConfig = {
+   /** @deprecated Use `whatsapp.messagePrefix` (WhatsApp-only inbound prefix). */
+   messagePrefix?: string;
+@@ -117,6 +126,8 @@ export type MessagesConfig = {
+   removeAckAfterReply?: boolean;
+   /** Lifecycle status reactions configuration. */
+   statusReactions?: StatusReactionsConfig;
++  /** Durable outbound delivery retry/expiry behavior. */
++  delivery?: MessagesDeliveryConfig;
+   /** When true, suppress ⚠️ tool-error warnings from being shown to the user. Default: false. */
+   suppressToolErrors?: boolean;
+   /** Text-to-speech settings for outbound replies. */
+diff --git a/src/config/zod-schema.session.ts b/src/config/zod-schema.session.ts
+index 648caa60f5bd..b3d5167a5434 100644
+--- a/src/config/zod-schema.session.ts
++++ b/src/config/zod-schema.session.ts
+@@ -185,6 +185,13 @@ export const MessagesSchema = z
+       })
+       .strict()
+       .optional(),
++    delivery: z
++      .object({
++        maxAgeMs: z.number().int().positive().optional(),
++        expireAction: z.enum(["fail", "deliver"]).optional(),
++      })
++      .strict()
++      .optional(),
+     suppressToolErrors: z.boolean().optional(),
+     tts: TtsConfigSchema,
+   })
+diff --git a/src/gateway/server-message-lifecycle.ts b/src/gateway/server-message-lifecycle.ts
+new file mode 100644
+index 000000000000..23288710bcc3
+--- /dev/null
++++ b/src/gateway/server-message-lifecycle.ts
+@@ -0,0 +1,99 @@
++import type { OpenClawConfig } from "../config/config.js";
++import { deliverOutboundPayloads } from "../infra/outbound/deliver.js";
++import {
++  OUTBOX_PRUNE_AGE_MS,
++  importLegacyFileQueue,
++  pruneOutbox,
++  recoverPendingDeliveries,
++} from "../infra/outbound/delivery-queue.js";
++import { sleep } from "../utils.js";
++
++type LifecycleWorkerLogger = {
++  info(msg: string): void;
++  warn(msg: string): void;
++  error(msg: string): void;
++  child?(name: string): LifecycleWorkerLogger;
++};
++
++export type LifecycleWorkerHandle = {
++  stop: () => Promise<void>;
++};
++
++type StartLifecycleWorkersParams = {
++  /** Live config getter — called on each worker pass so hot-reloaded values take effect. */
++  getCfg: () => OpenClawConfig;
++  log: LifecycleWorkerLogger;
++  stateDir?: string;
++  outboxIntervalMs?: number;
++};
++
++function childLogger(logger: LifecycleWorkerLogger, name: string): LifecycleWorkerLogger {
++  return typeof logger.child === "function" ? logger.child(name) : logger;
++}
++
++export async function startMessageLifecycleWorkers(
++  params: StartLifecycleWorkersParams,
++): Promise<LifecycleWorkerHandle> {
++  const outboxLog = childLogger(params.log, "outbox-worker");
++
++  // Record startup time before any long startup work. The outbox worker uses this to skip
++  // entries enqueued after startup (those are being delivered on the direct path and must
++  // not be double-delivered). Only entries older than this timestamp are crash survivors.
++  // Must be taken before importLegacyFileQueue so entries enqueued during import are not
++  // misclassified as pre-start crash survivors and retried in the same cycle.
++  const startupCutoff = Date.now();
++
++  await importLegacyFileQueue(params.stateDir).catch((err) => {
++    params.log.warn(`message-lifecycle: legacy queue import failed: ${String(err)}`);
++  });
++
++  const outboxIntervalMs = Math.max(250, Math.floor(params.outboxIntervalMs ?? 1000));
++
++  let stopped = false;
++
++  const runOutboxPass = async (): Promise<void> => {
++    const summary = await recoverPendingDeliveries({
++      deliver: deliverOutboundPayloads,
++      log: outboxLog,
++      cfg: params.getCfg(),
++      stateDir: params.stateDir,
++      maxRecoveryMs: Math.max(750, Math.floor(outboxIntervalMs * 0.75)),
++      startupCutoff,
++    });
++    if (
++      summary.recovered > 0 ||
++      summary.failed > 0 ||
++      summary.skippedMaxRetries > 0 ||
++      summary.skippedStartupCutoff > 0
++    ) {
++      outboxLog.info(
++        `pass recovered=${summary.recovered} failed=${summary.failed} skippedMaxRetries=${summary.skippedMaxRetries} deferredBackoff=${summary.deferredBackoff} skippedStartupCutoff=${summary.skippedStartupCutoff}`,
++      );
++    }
++    pruneOutbox(OUTBOX_PRUNE_AGE_MS, params.stateDir);
++  };
++
++  const outboxTask = (async () => {
++    while (!stopped) {
++      try {
++        await runOutboxPass();
++      } catch (err) {
++        outboxLog.error(`outbox worker pass failed: ${String(err)}`);
++      }
++      if (stopped) {
++        break;
++      }
++      await sleep(outboxIntervalMs);
++    }
++  })();
++
++  return {
++    stop: async () => {
++      if (stopped) {
++        return;
++      }
++      stopped = true;
++      await Promise.allSettled([outboxTask]);
++    },
++  };
++}
+diff --git a/src/gateway/server.impl.ts b/src/gateway/server.impl.ts
+index bd4ae5078613..dace42e27cab 100644
+--- a/src/gateway/server.impl.ts
++++ b/src/gateway/server.impl.ts
+@@ -703,18 +703,17 @@ export async function startGatewayServer(
+     void cron.start().catch((err) => logCron.error(`failed to start: ${String(err)}`));
+   }
+ 
+-  // Recover pending outbound deliveries from previous crash/restart.
++  // Start message lifecycle workers (outbox recovery + pruning).
++  let lifecycleWorkers: import("./server-message-lifecycle.js").LifecycleWorkerHandle | undefined;
++  let lifecycleWorkersPromise: Promise<void | undefined> = Promise.resolve(undefined);
+   if (!minimalTestGateway) {
+-    void (async () => {
+-      const { recoverPendingDeliveries } = await import("../infra/outbound/delivery-queue.js");
+-      const { deliverOutboundPayloads } = await import("../infra/outbound/deliver.js");
+-      const logRecovery = log.child("delivery-recovery");
+-      await recoverPendingDeliveries({
+-        deliver: deliverOutboundPayloads,
+-        log: logRecovery,
+-        cfg: cfgAtStart,
++    lifecycleWorkersPromise = (async () => {
++      const { startMessageLifecycleWorkers } = await import("./server-message-lifecycle.js");
++      lifecycleWorkers = await startMessageLifecycleWorkers({
++        getCfg: loadConfig,
++        log: log.child("message-lifecycle"),
+       });
+-    })().catch((err) => log.error(`Delivery recovery failed: ${String(err)}`));
++    })().catch((err) => log.error(`Message lifecycle workers failed: ${String(err)}`));
+   }
+ 
+   const execApprovalManager = new ExecApprovalManager();
+@@ -988,6 +987,8 @@ export async function startGatewayServer(
+       authRateLimiter?.dispose();
+       browserAuthRateLimiter.dispose();
+       channelHealthMonitor?.stop();
++      await lifecycleWorkersPromise.catch(() => undefined);
++      await lifecycleWorkers?.stop();
+       clearSecretsRuntimeSnapshot();
+       await close(opts);
+     },
+diff --git a/src/infra/message-lifecycle/db.ts b/src/infra/message-lifecycle/db.ts
+new file mode 100644
+index 000000000000..869a8713f582
+--- /dev/null
++++ b/src/infra/message-lifecycle/db.ts
+@@ -0,0 +1,138 @@
++import fs from "node:fs";
++import path from "node:path";
++import type { DatabaseSync } from "node:sqlite";
++import { resolveStateDir } from "../../config/paths.js";
++import { logVerbose } from "../../globals.js";
++import { requireNodeSqlite } from "../../memory/sqlite.js";
++
++const DB_FILENAME = "message-lifecycle.db";
++const DB_CACHE = new Map<string, DatabaseSync>();
++let registeredCleanupHook = false;
++
++export function getLifecycleDb(stateDir?: string): DatabaseSync {
++  const base = stateDir ?? resolveStateDir();
++  const dbPath = path.resolve(path.join(base, DB_FILENAME));
++  const cached = DB_CACHE.get(dbPath);
++  if (cached) {
++    return cached;
++  }
++  // Once a path falls back to in-memory, stick with it for the process lifetime
++  // to avoid orphaning the in-memory DB if the disk recovers later.
++  const memCached = DB_CACHE.get(`memory:${dbPath}`);
++  if (memCached) {
++    return memCached;
++  }
++
++  const { DatabaseSync } = requireNodeSqlite();
++  let db: DatabaseSync;
++  let cacheKey = dbPath;
++  try {
++    fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
++    db = new DatabaseSync(dbPath);
++  } catch (err) {
++    const fallbackKey = `memory:${dbPath}`;
++    const fallbackCached = DB_CACHE.get(fallbackKey);
++    if (fallbackCached) {
++      return fallbackCached;
++    }
++    db = new DatabaseSync(":memory:");
++    cacheKey = fallbackKey;
++    logVerbose(
++      `message-lifecycle/db: failed to open ${dbPath}; using in-memory fallback (${String(err)})`,
++    );
++  }
++  db.exec("PRAGMA journal_mode=WAL;");
++  db.exec("PRAGMA synchronous=NORMAL;");
++  db.exec("PRAGMA busy_timeout=5000;");
++  ensureLifecycleSchema(db);
++  registerCleanupHook();
++  DB_CACHE.set(cacheKey, db);
++  return db;
++}
++
++export function ensureLifecycleSchema(db: DatabaseSync): void {
++  db.exec(`
++    CREATE TABLE IF NOT EXISTS message_outbox (
++      id              TEXT NOT NULL PRIMARY KEY,
++      turn_id         TEXT,
++      channel         TEXT NOT NULL,
++      account_id      TEXT NOT NULL DEFAULT '',
++      target          TEXT NOT NULL DEFAULT '',
++      dispatch_kind   TEXT,
++      payload         TEXT NOT NULL,
++      queued_at       INTEGER NOT NULL,
++      status          TEXT NOT NULL DEFAULT 'queued',
++      attempt_count   INTEGER NOT NULL DEFAULT 0,
++      next_attempt_at INTEGER NOT NULL,
++      last_attempt_at INTEGER,
++      last_error      TEXT,
++      error_class     TEXT,
++      delivered_at    INTEGER,
++      terminal_reason TEXT,
++      completed_at    INTEGER,
++      idempotency_key TEXT
++    );
++  `);
++
++  db.exec(`
++    CREATE UNIQUE INDEX IF NOT EXISTS idx_message_outbox_idem
++      ON message_outbox(idempotency_key)
++      WHERE idempotency_key IS NOT NULL;
++  `);
++  db.exec(`
++    CREATE INDEX IF NOT EXISTS idx_message_outbox_turn_status
++      ON message_outbox(turn_id, status)
++      WHERE turn_id IS NOT NULL;
++  `);
++  db.exec(`
++    CREATE INDEX IF NOT EXISTS idx_message_outbox_resume
++      ON message_outbox(status, next_attempt_at, queued_at);
++  `);
++}
++
++function registerCleanupHook(): void {
++  if (registeredCleanupHook) {
++    return;
++  }
++  registeredCleanupHook = true;
++  process.once("exit", closeLifecycleDbCache);
++}
++
++/** True when the lifecycle DB for `stateDir` fell back to `:memory:`. */
++export function isLifecycleDbInMemory(stateDir?: string): boolean {
++  const base = stateDir ?? resolveStateDir();
++  const dbPath = path.resolve(path.join(base, DB_FILENAME));
++  // In-memory fallback uses `memory:${dbPath}` as cache key (see getLifecycleDb).
++  return DB_CACHE.has(`memory:${dbPath}`);
++}
++
++export function closeLifecycleDbCache(): void {
++  for (const db of DB_CACHE.values()) {
++    try {
++      db.close();
++    } catch {
++      // Ignore close failures.
++    }
++  }
++  DB_CACHE.clear();
++}
++
++export function clearLifecycleDbCacheForTest(): void {
++  closeLifecycleDbCache();
++}
++
++export function runLifecycleTransaction<T>(db: DatabaseSync, op: () => T): T {
++  db.exec("BEGIN IMMEDIATE");
++  try {
++    const result = op();
++    db.exec("COMMIT");
++    return result;
++  } catch (err) {
++    try {
++      db.exec("ROLLBACK");
++    } catch {
++      // Ignore rollback failure; preserve root error.
++    }
++    throw err;
++  }
++}
+diff --git a/src/infra/message-lifecycle/index.ts b/src/infra/message-lifecycle/index.ts
+new file mode 100644
+index 000000000000..17d5c2f2e1fb
+--- /dev/null
++++ b/src/infra/message-lifecycle/index.ts
+@@ -0,0 +1 @@
++export * from "./db.js";
+diff --git a/src/infra/outbound/deliver.test.ts b/src/infra/outbound/deliver.test.ts
+index 7bc6d69f98ae..6c1c9f832a7a 100644
+--- a/src/infra/outbound/deliver.test.ts
++++ b/src/infra/outbound/deliver.test.ts
+@@ -30,6 +30,7 @@ const queueMocks = vi.hoisted(() => ({
+   enqueueDelivery: vi.fn(async () => "mock-queue-id"),
+   ackDelivery: vi.fn(async () => {}),
+   failDelivery: vi.fn(async () => {}),
++  markAttemptStarted: vi.fn(async () => {}),
+ }));
+ const logMocks = vi.hoisted(() => ({
+   warn: vi.fn(),
+@@ -55,6 +56,7 @@ vi.mock("./delivery-queue.js", () => ({
+   enqueueDelivery: queueMocks.enqueueDelivery,
+   ackDelivery: queueMocks.ackDelivery,
+   failDelivery: queueMocks.failDelivery,
++  markAttemptStarted: queueMocks.markAttemptStarted,
+ }));
+ vi.mock("../../logging/subsystem.js", () => ({
+   createSubsystemLogger: () => {
+diff --git a/src/infra/outbound/deliver.ts b/src/infra/outbound/deliver.ts
+index 0b1f0bc72fce..08ca3a0f287a 100644
+--- a/src/infra/outbound/deliver.ts
++++ b/src/infra/outbound/deliver.ts
+@@ -36,7 +36,12 @@ import type { sendMessageSlack } from "../../slack/send.js";
+ import type { sendMessageTelegram } from "../../telegram/send.js";
+ import type { sendMessageWhatsApp } from "../../web/outbound.js";
+ import { throwIfAborted } from "./abort.js";
+-import { ackDelivery, enqueueDelivery, failDelivery } from "./delivery-queue.js";
++import {
++  ackDelivery,
++  enqueueDelivery,
++  failDelivery,
++  markAttemptStarted,
++} from "./delivery-queue.js";
+ import type { OutboundIdentity } from "./identity.js";
+ import type { NormalizedOutboundPayload } from "./payloads.js";
+ import { normalizeReplyPayloadsForDelivery } from "./payloads.js";
+@@ -248,6 +253,10 @@ type DeliverOutboundPayloadsCoreParams = {
+     groupId?: string;
+   };
+   silent?: boolean;
++  /** Links outbox queue rows to a durable message turn. */
++  turnId?: string;
++  /** Dispatch kind for outbox tracking and recovery filtering. */
++  dispatchKind?: "tool" | "block" | "final";
+ };
+ 
+ type DeliverOutboundPayloadsParams = DeliverOutboundPayloadsCoreParams & {
+@@ -480,22 +489,32 @@ export async function deliverOutboundPayloads(
+         gifPlayback: params.gifPlayback,
+         silent: params.silent,
+         mirror: params.mirror,
++        turnId: params.turnId,
++        dispatchKind: params.dispatchKind,
+       }).catch(() => null); // Best-effort — don't block delivery if queue write fails.
+ 
+   // Wrap onError to detect partial failures under bestEffort mode.
+   // When bestEffort is true, per-payload errors are caught and passed to onError
+   // without throwing — so the outer try/catch never fires. We track whether any
+   // payload failed so we can call failDelivery instead of ackDelivery.
++  // When bestEffort is true but onError is absent, we still wrap so hadPartialFailure is set.
+   let hadPartialFailure = false;
+-  const wrappedParams = params.onError
+-    ? {
+-        ...params,
+-        onError: (err: unknown, payload: NormalizedOutboundPayload) => {
+-          hadPartialFailure = true;
+-          params.onError!(err, payload);
+-        },
+-      }
+-    : params;
++  const wrappedParams =
++    params.bestEffort || params.onError
++      ? {
++          ...params,
++          onError: (err: unknown, payload: NormalizedOutboundPayload) => {
++            hadPartialFailure = true;
++            params.onError?.(err, payload);
++          },
++        }
++      : params;
++
++  // Mark attempt started before sending so the row passes startup-cutoff
++  // filtering even if the subsequent ack/fail write is swallowed.
++  if (queueId) {
++    await markAttemptStarted(queueId).catch(() => {});
++  }
+ 
+   try {
+     const results = await deliverOutboundPayloadsCore(wrappedParams);
+diff --git a/src/infra/outbound/delivery-queue.ts b/src/infra/outbound/delivery-queue.ts
+index e84527b461e2..b27ea0131fd6 100644
+--- a/src/infra/outbound/delivery-queue.ts
++++ b/src/infra/outbound/delivery-queue.ts
+@@ -3,12 +3,17 @@ import path from "node:path";
+ import type { ReplyPayload } from "../../auto-reply/types.js";
+ import type { OpenClawConfig } from "../../config/config.js";
+ import { resolveStateDir } from "../../config/paths.js";
++import { logVerbose } from "../../globals.js";
++import {
++  getLifecycleDb,
++  isLifecycleDbInMemory,
++  runLifecycleTransaction,
++} from "../message-lifecycle/db.js";
+ import { generateSecureUuid } from "../secure-random.js";
+ import type { OutboundChannel } from "./targets.js";
+ 
+-const QUEUE_DIRNAME = "delivery-queue";
+-const FAILED_DIRNAME = "failed";
+ const MAX_RETRIES = 5;
++export { MAX_RETRIES };
+ 
+ /** Backoff delays in milliseconds indexed by retry count (1-based). */
+ const BACKOFF_MS: readonly number[] = [
+@@ -18,6 +23,11 @@ const BACKOFF_MS: readonly number[] = [
+   600_000, // retry 4: 10m
+ ];
+ 
++/** Default expiry for stale queued messages. */
++const DEFAULT_OUTBOX_MAX_AGE_MS = 30 * 60_000;
++/** Terminal outbox rows older than this are pruned. */
++export const OUTBOX_PRUNE_AGE_MS = 48 * 60 * 60_000;
++
+ type DeliveryMirrorPayload = {
+   sessionKey: string;
+   agentId?: string;
+@@ -29,11 +39,6 @@ type QueuedDeliveryPayload = {
+   channel: Exclude<OutboundChannel, "none">;
+   to: string;
+   accountId?: string;
+-  /**
+-   * Original payloads before plugin hooks. On recovery, hooks re-run on these
+-   * payloads — this is intentional since hooks are stateless transforms and
+-   * should produce the same result on replay.
+-   */
+   payloads: ReplyPayload[];
+   threadId?: string | number | null;
+   replyToId?: string | null;
+@@ -41,6 +46,12 @@ type QueuedDeliveryPayload = {
+   gifPlayback?: boolean;
+   silent?: boolean;
+   mirror?: DeliveryMirrorPayload;
++  /** Dispatch kind (tool/block/final). Non-final entries are skipped during recovery. */
++  dispatchKind?: "tool" | "block" | "final";
++};
++
++type QueuedDeliveryParams = QueuedDeliveryPayload & {
++  turnId?: string;
+ };
+ 
+ export interface QueuedDelivery extends QueuedDeliveryPayload {
+@@ -49,6 +60,8 @@ export interface QueuedDelivery extends QueuedDeliveryPayload {
+   retryCount: number;
+   lastAttemptAt?: number;
+   lastError?: string;
++  turnId?: string;
++  dispatchKind?: "tool" | "block" | "final";
+ }
+ 
+ export type RecoverySummary = {
+@@ -56,37 +69,63 @@ export type RecoverySummary = {
+   failed: number;
+   skippedMaxRetries: number;
+   deferredBackoff: number;
++  /** Entries skipped because they were enqueued after gateway startup (live delivery in progress). */
++  skippedStartupCutoff: number;
+ };
+ 
++export type DeliverFn = (
++  params: {
++    cfg: OpenClawConfig;
++  } & QueuedDeliveryParams & {
++      skipQueue?: boolean;
++    },
++) => Promise<unknown>;
++
++export interface RecoveryLogger {
++  info(msg: string): void;
++  warn(msg: string): void;
++  error(msg: string): void;
++}
++
+ function resolveQueueDir(stateDir?: string): string {
+   const base = stateDir ?? resolveStateDir();
+-  return path.join(base, QUEUE_DIRNAME);
++  return path.join(base, "delivery-queue");
++}
++
++function resolveDeliveryMaxAgeMs(cfg: OpenClawConfig): number {
++  const configured = cfg.messages?.delivery?.maxAgeMs;
++  if (typeof configured !== "number" || !Number.isFinite(configured) || configured <= 0) {
++    return DEFAULT_OUTBOX_MAX_AGE_MS;
++  }
++  return Math.floor(configured);
+ }
+ 
+-function resolveFailedDir(stateDir?: string): string {
+-  return path.join(resolveQueueDir(stateDir), FAILED_DIRNAME);
++function resolveExpireAction(cfg: OpenClawConfig): "fail" | "deliver" {
++  const action = cfg.messages?.delivery?.expireAction;
++  // Default to "deliver" so that a long gateway restart doesn't permanently
++  // drop queued messages. Operators can opt into "fail" explicitly.
++  return action === "fail" ? "fail" : "deliver";
+ }
+ 
+-/** Ensure the queue directory (and failed/ subdirectory) exist. */
+ export async function ensureQueueDir(stateDir?: string): Promise<string> {
++  // Kept for backward compatibility with callers/tests that expect this helper.
++  // SQLite-backed queue does not require directory structure, but we retain the
++  // legacy queue path for one-time import support.
+   const queueDir = resolveQueueDir(stateDir);
+   await fs.promises.mkdir(queueDir, { recursive: true, mode: 0o700 });
+-  await fs.promises.mkdir(resolveFailedDir(stateDir), { recursive: true, mode: 0o700 });
++  await fs.promises.mkdir(path.join(queueDir, "failed"), { recursive: true, mode: 0o700 });
+   return queueDir;
+ }
+ 
+-/** Persist a delivery entry to disk before attempting send. Returns the entry ID. */
+-type QueuedDeliveryParams = QueuedDeliveryPayload;
+-
++/** Persist a delivery entry before attempting send. Returns the entry ID. */
+ export async function enqueueDelivery(
+   params: QueuedDeliveryParams,
+   stateDir?: string,
+ ): Promise<string> {
+-  const queueDir = await ensureQueueDir(stateDir);
++  const db = getLifecycleDb(stateDir);
+   const id = generateSecureUuid();
+-  const entry: QueuedDelivery = {
+-    id,
+-    enqueuedAt: Date.now(),
++  const now = Date.now();
++  const payload = JSON.stringify({
+     channel: params.channel,
+     to: params.to,
+     accountId: params.accountId,
+@@ -97,106 +136,247 @@ export async function enqueueDelivery(
+     gifPlayback: params.gifPlayback,
+     silent: params.silent,
+     mirror: params.mirror,
+-    retryCount: 0,
+-  };
+-  const filePath = path.join(queueDir, `${id}.json`);
+-  const tmp = `${filePath}.${process.pid}.tmp`;
+-  const json = JSON.stringify(entry, null, 2);
+-  await fs.promises.writeFile(tmp, json, { encoding: "utf-8", mode: 0o600 });
+-  await fs.promises.rename(tmp, filePath);
++    dispatchKind: params.dispatchKind,
++  });
++  db.prepare(
++    `INSERT INTO message_outbox
++       (id, turn_id, channel, account_id, target, dispatch_kind, payload, queued_at, status, attempt_count, next_attempt_at)
++     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)`,
++  ).run(
++    id,
++    params.turnId ?? null,
++    params.channel,
++    params.accountId ?? "",
++    params.to,
++    params.dispatchKind ?? null,
++    payload,
++    now,
++    now,
++  );
+   return id;
+ }
+ 
+-/** Remove a successfully delivered entry from the queue. */
+-export async function ackDelivery(id: string, stateDir?: string): Promise<void> {
+-  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
++/**
++ * Mark a delivery as "attempt started" before the actual send.
++ * This ensures the row passes startup-cutoff filtering even if the
++ * subsequent ack/fail bookkeeping write is swallowed.
++ *
++ * Also pushes next_attempt_at forward by the second-retry backoff (25s)
++ * to prevent the recovery worker from picking up the row while the direct
++ * send is still in progress. We use the second tier rather than the first
++ * (5s) because some channels have longer timeouts (e.g. Signal 10s RPC).
++ * If the direct send completes normally, ackDelivery or failDelivery
++ * finalizes the row before recovery touches it.
++ */
++export async function markAttemptStarted(id: string, stateDir?: string): Promise<void> {
++  const db = getLifecycleDb(stateDir);
+   try {
+-    await fs.promises.unlink(filePath);
++    const now = Date.now();
++    db.prepare(
++      `UPDATE message_outbox
++         SET last_attempt_at = ?, next_attempt_at = ?
++       WHERE id = ? AND last_attempt_at IS NULL`,
++    ).run(now, now + computeBackoffMs(2), id);
+   } catch (err) {
+-    const code =
+-      err && typeof err === "object" && "code" in err
+-        ? String((err as { code?: unknown }).code)
+-        : null;
+-    if (code !== "ENOENT") {
+-      throw err;
+-    }
+-    // Already removed — no-op.
++    logVerbose(`delivery-queue: markAttemptStarted failed: ${String(err)}`);
+   }
+ }
+ 
+-/** Update a queue entry after a failed delivery attempt. */
+-export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
+-  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+-  const raw = await fs.promises.readFile(filePath, "utf-8");
+-  const entry: QueuedDelivery = JSON.parse(raw);
+-  entry.retryCount += 1;
+-  entry.lastAttemptAt = Date.now();
+-  entry.lastError = error;
+-  const tmp = `${filePath}.${process.pid}.tmp`;
+-  await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
+-    encoding: "utf-8",
+-    mode: 0o600,
+-  });
+-  await fs.promises.rename(tmp, filePath);
++// ackDelivery is best-effort bookkeeping after a successful send.
++// If the UPDATE fails, the entry stays queued and the recovery worker
++// will re-send it. This is safe because channel sends are idempotent
++// (via idempotency keys where supported, or harmless duplicate delivery).
++/** Mark a delivery as successful. */
++export async function ackDelivery(id: string, stateDir?: string): Promise<void> {
++  const db = getLifecycleDb(stateDir);
++  try {
++    db.prepare(
++      `UPDATE message_outbox
++         SET status='delivered', delivered_at=?, completed_at=?
++       WHERE id=?`,
++    ).run(Date.now(), Date.now(), id);
++  } catch (err) {
++    logVerbose(`delivery-queue: ackDelivery failed: ${String(err)}`);
++  }
+ }
+ 
+-/** Load all pending delivery entries from the queue directory. */
+-export async function loadPendingDeliveries(stateDir?: string): Promise<QueuedDelivery[]> {
+-  const queueDir = resolveQueueDir(stateDir);
+-  let files: string[];
++// failDelivery write errors are self-correcting: the entry remains in
++// 'queued' status and will be retried up to MAX_RETRIES times.
++// After MAX_RETRIES, moveToFailed marks it terminal.
++/** Record a failed delivery attempt. */
++export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
++  const db = getLifecycleDb(stateDir);
+   try {
+-    files = await fs.promises.readdir(queueDir);
+-  } catch (err) {
+-    const code =
+-      err && typeof err === "object" && "code" in err
+-        ? String((err as { code?: unknown }).code)
+-        : null;
+-    if (code === "ENOENT") {
+-      return [];
++    // Only act on non-terminal rows — if the live path already acked/failed
++    // this entry, the recovery worker should not resurrect it.
++    const row = db
++      .prepare(
++        `SELECT attempt_count, dispatch_kind FROM message_outbox WHERE id=? AND status IN ('queued','failed_retryable')`,
++      )
++      .get(id) as { attempt_count: number; dispatch_kind: string | null } | undefined;
++    if (!row) {
++      return;
+     }
+-    throw err;
+-  }
+-  const entries: QueuedDelivery[] = [];
+-  for (const file of files) {
+-    if (!file.endsWith(".json")) {
+-      continue;
++    const now = Date.now();
++    if (isPermanentDeliveryError(error)) {
++      db.prepare(
++        `UPDATE message_outbox
++           SET status='failed_terminal',
++               error_class='permanent',
++               attempt_count=?,
++               last_error=?,
++               last_attempt_at=?,
++               completed_at=?,
++               terminal_reason=?
++         WHERE id=?`,
++      ).run(row.attempt_count + 1, error, now, now, error, id);
++      return;
+     }
+-    const filePath = path.join(queueDir, file);
+-    try {
+-      const stat = await fs.promises.stat(filePath);
+-      if (!stat.isFile()) {
+-        continue;
+-      }
+-      const raw = await fs.promises.readFile(filePath, "utf-8");
+-      const parsed = JSON.parse(raw) as QueuedDelivery;
+-      const { entry, migrated } = normalizeLegacyQueuedDeliveryEntry(parsed);
+-      if (migrated) {
+-        const tmp = `${filePath}.${process.pid}.tmp`;
+-        await fs.promises.writeFile(tmp, JSON.stringify(entry, null, 2), {
+-          encoding: "utf-8",
+-          mode: 0o600,
++    // Non-final rows (tool/block dispatches) have no recovery path — recovery
++    // skips them by dispatch_kind filter. Mark terminal immediately rather than
++    // leaving them in failed_retryable where they'd accumulate.
++    if (row.dispatch_kind && row.dispatch_kind !== "final") {
++      db.prepare(
++        `UPDATE message_outbox
++           SET status='failed_terminal',
++               error_class='terminal',
++               attempt_count=?,
++               last_error=?,
++               last_attempt_at=?,
++               completed_at=?,
++               terminal_reason=?
++         WHERE id=?`,
++      ).run(row.attempt_count + 1, error, now, now, "non-final dispatch; no recovery path", id);
++      return;
++    }
++    const nextCount = row.attempt_count + 1;
++    if (nextCount >= MAX_RETRIES) {
++      db.prepare(
++        `UPDATE message_outbox
++           SET status='failed_terminal',
++               error_class='terminal',
++               attempt_count=?,
++               last_error=?,
++               last_attempt_at=?,
++               completed_at=?,
++               terminal_reason=?
++         WHERE id=?`,
++      ).run(nextCount, error, now, now, error, id);
++      return;
++    }
++    db.prepare(
++      `UPDATE message_outbox
++         SET status='failed_retryable',
++             attempt_count=?,
++             last_error=?,
++             last_attempt_at=?,
++             next_attempt_at=?
++       WHERE id=?`,
++    ).run(nextCount, error, now, now + computeBackoffMs(nextCount), id);
++  } catch (err) {
++    logVerbose(`delivery-queue: failDelivery failed: ${String(err)}`);
++  }
++}
++
++/** Load pending queue entries eligible for retry now. */
++export async function loadPendingDeliveries(
++  stateDir?: string,
++  startupCutoff?: number,
++): Promise<QueuedDelivery[]> {
++  const db = getLifecycleDb(stateDir);
++  try {
++    // When a startupCutoff is supplied (gateway startup timestamp), exclude entries that were
++    // enqueued during this instance's lifetime and have never been attempted. Those entries are
++    // actively being delivered on the direct path; picking them up would cause duplicate sends.
++    // Entries enqueued before startup (crash survivors) or entries that have already had at least
++    // one attempt (transient failures) are always included.
++    const now = Date.now();
++    const rows = (
++      startupCutoff !== undefined
++        ? db
++            .prepare(
++              `SELECT id, payload, queued_at, attempt_count, last_attempt_at, last_error, turn_id
++                 FROM message_outbox
++                WHERE status IN ('queued', 'failed_retryable')
++                  AND (dispatch_kind IS NULL OR dispatch_kind = 'final')
++                  AND next_attempt_at <= ?
++                  AND (queued_at < ? OR last_attempt_at IS NOT NULL OR attempt_count > 0)
++                ORDER BY queued_at ASC`,
++            )
++            .all(now, startupCutoff)
++        : db
++            .prepare(
++              `SELECT id, payload, queued_at, attempt_count, last_attempt_at, last_error, turn_id
++                 FROM message_outbox
++                WHERE status IN ('queued', 'failed_retryable')
++                  AND (dispatch_kind IS NULL OR dispatch_kind = 'final')
++                  AND next_attempt_at <= ?
++                ORDER BY queued_at ASC`,
++            )
++            .all(now)
++    ) as Array<{
++      id: string;
++      payload: string;
++      queued_at: number;
++      attempt_count: number;
++      last_attempt_at: number | null;
++      last_error: string | null;
++      turn_id: string | null;
++    }>;
++
++    const entries: QueuedDelivery[] = [];
++    for (const row of rows) {
++      try {
++        const parsed = JSON.parse(row.payload) as QueuedDeliveryPayload;
++        entries.push({
++          ...parsed,
++          id: row.id,
++          enqueuedAt: row.queued_at,
++          retryCount: row.attempt_count,
++          ...(row.last_attempt_at != null ? { lastAttemptAt: row.last_attempt_at } : {}),
++          ...(row.last_error ? { lastError: row.last_error } : {}),
++          ...(row.turn_id ? { turnId: row.turn_id } : {}),
+         });
+-        await fs.promises.rename(tmp, filePath);
++      } catch (err) {
++        const errMsg = err instanceof Error ? err.message : String(err);
++        db.prepare(
++          `UPDATE message_outbox
++             SET status='failed_terminal',
++                 error_class='terminal',
++                 last_error=?,
++                 terminal_reason=?,
++                 completed_at=?
++           WHERE id=?`,
++        ).run(`invalid payload: ${errMsg}`, `invalid payload: ${errMsg}`, Date.now(), row.id);
+       }
+-      entries.push(entry);
+-    } catch {
+-      // Skip malformed or inaccessible entries.
+     }
++    return entries;
++  } catch (err) {
++    logVerbose(`delivery-queue: loadPendingDeliveries failed: ${String(err)}`);
++    return [];
+   }
+-  return entries;
+ }
+ 
+-/** Move a queue entry to the failed/ subdirectory. */
++/** Mark an entry as terminal failed.
++ * Only acts on non-terminal rows so we never overwrite an already-acked or
++ * already-failed entry (mirrors the guard in failDelivery). */
+ export async function moveToFailed(id: string, stateDir?: string): Promise<void> {
+-  const queueDir = resolveQueueDir(stateDir);
+-  const failedDir = resolveFailedDir(stateDir);
+-  await fs.promises.mkdir(failedDir, { recursive: true, mode: 0o700 });
+-  const src = path.join(queueDir, `${id}.json`);
+-  const dest = path.join(failedDir, `${id}.json`);
+-  await fs.promises.rename(src, dest);
++  const db = getLifecycleDb(stateDir);
++  try {
++    db.prepare(
++      `UPDATE message_outbox
++         SET status='failed_terminal',
++             error_class='terminal',
++             terminal_reason=COALESCE(terminal_reason,'moved to failed'),
++             completed_at=?
++       WHERE id=? AND status IN ('queued','failed_retryable')`,
++    ).run(Date.now(), id);
++  } catch (err) {
++    logVerbose(`delivery-queue: moveToFailed failed: ${String(err)}`);
++  }
+ }
+ 
+-/** Compute the backoff delay in ms for a given retry count. */
++/** Compute retry backoff in milliseconds. */
+ export function computeBackoffMs(retryCount: number): number {
+   if (retryCount <= 0) {
+     return 0;
+@@ -208,7 +388,11 @@ export function isEntryEligibleForRecoveryRetry(
+   entry: QueuedDelivery,
+   now: number,
+ ): { eligible: true } | { eligible: false; remainingBackoffMs: number } {
+-  const backoff = computeBackoffMs(entry.retryCount + 1);
++  // Use the same backoff level that failDelivery used when writing next_attempt_at.
++  // failDelivery increments attempt_count to nextCount and writes
++  // next_attempt_at = now + computeBackoffMs(nextCount), so entry.retryCount
++  // already reflects the incremented value.
++  const backoff = computeBackoffMs(entry.retryCount);
+   if (backoff <= 0) {
+     return { eligible: true };
+   }
+@@ -220,9 +404,7 @@ export function isEntryEligibleForRecoveryRetry(
+     typeof entry.lastAttemptAt === "number" &&
+     Number.isFinite(entry.lastAttemptAt) &&
+     entry.lastAttemptAt > 0;
+-  const baseAttemptAt = hasAttemptTimestamp
+-    ? (entry.lastAttemptAt ?? entry.enqueuedAt)
+-    : entry.enqueuedAt;
++  const baseAttemptAt = hasAttemptTimestamp ? entry.lastAttemptAt! : entry.enqueuedAt;
+   const nextEligibleAt = baseAttemptAt + backoff;
+   if (now >= nextEligibleAt) {
+     return { eligible: true };
+@@ -230,71 +412,174 @@ export function isEntryEligibleForRecoveryRetry(
+   return { eligible: false, remainingBackoffMs: nextEligibleAt - now };
+ }
+ 
+-function normalizeLegacyQueuedDeliveryEntry(entry: QueuedDelivery): {
+-  entry: QueuedDelivery;
+-  migrated: boolean;
+-} {
+-  const hasAttemptTimestamp =
+-    typeof entry.lastAttemptAt === "number" &&
+-    Number.isFinite(entry.lastAttemptAt) &&
+-    entry.lastAttemptAt > 0;
+-  if (hasAttemptTimestamp || entry.retryCount <= 0) {
+-    return { entry, migrated: false };
++/**
++ * Import legacy file queue entries into SQLite outbox.
++ * This is deterministic and idempotent for existing IDs.
++ */
++export async function importLegacyFileQueue(stateDir?: string): Promise<void> {
++  const queueDir = resolveQueueDir(stateDir);
++  const db = getLifecycleDb(stateDir);
++  // Don't delete legacy files when the DB is in-memory; they'd be lost on restart.
++  const inMemory = isLifecycleDbInMemory(stateDir);
++  let files: string[];
++  try {
++    files = fs.readdirSync(queueDir);
++  } catch {
++    return;
+   }
+-  const hasEnqueuedTimestamp =
+-    typeof entry.enqueuedAt === "number" &&
+-    Number.isFinite(entry.enqueuedAt) &&
+-    entry.enqueuedAt > 0;
+-  if (!hasEnqueuedTimestamp) {
+-    return { entry, migrated: false };
++  for (const file of files) {
++    if (!file.endsWith(".json")) {
++      continue;
++    }
++    const filePath = path.join(queueDir, file);
++    try {
++      const stat = fs.statSync(filePath);
++      if (!stat.isFile()) {
++        continue;
++      }
++      const raw = fs.readFileSync(filePath, "utf-8");
++      const entry = JSON.parse(raw) as QueuedDelivery;
++      if (!entry.id || !entry.channel || !entry.to) {
++        continue;
++      }
++      const payload = JSON.stringify({
++        channel: entry.channel,
++        to: entry.to,
++        accountId: entry.accountId,
++        payloads: entry.payloads,
++        threadId: entry.threadId,
++        replyToId: entry.replyToId,
++        bestEffort: entry.bestEffort,
++        gifPlayback: entry.gifPlayback,
++        silent: entry.silent,
++        mirror: entry.mirror,
++      });
++      runLifecycleTransaction(db, () => {
++        db.prepare(
++          `INSERT OR IGNORE INTO message_outbox
++             (id, turn_id, channel, account_id, target, payload, queued_at, status,
++              attempt_count, next_attempt_at, last_error, last_attempt_at)
++           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++        ).run(
++          entry.id,
++          entry.turnId ?? null,
++          entry.channel,
++          entry.accountId ?? "",
++          entry.to,
++          payload,
++          entry.enqueuedAt ?? Date.now(),
++          "queued",
++          entry.retryCount ?? 0,
++          // Respect backoff for imported entries: base from last attempt (or enqueue time)
++          // plus computed backoff for the current retry count.
++          (entry.lastAttemptAt ?? entry.enqueuedAt ?? Date.now()) +
++            computeBackoffMs(entry.retryCount ?? 0),
++          entry.lastError ?? null,
++          entry.lastAttemptAt ?? null,
++        );
++      });
++      if (!inMemory) {
++        fs.unlinkSync(filePath);
++      }
++    } catch (err) {
++      logVerbose(`delivery-queue: failed to import ${filePath}: ${String(err)}`);
++    }
+   }
+-  return {
+-    entry: {
+-      ...entry,
+-      lastAttemptAt: entry.enqueuedAt,
+-    },
+-    migrated: true,
+-  };
+-}
+-
+-export type DeliverFn = (
+-  params: {
+-    cfg: OpenClawConfig;
+-  } & QueuedDeliveryParams & {
+-      skipQueue?: boolean;
+-    },
+-) => Promise<unknown>;
+-
+-export interface RecoveryLogger {
+-  info(msg: string): void;
+-  warn(msg: string): void;
+-  error(msg: string): void;
+ }
+ 
+ /**
+- * On gateway startup, scan the delivery queue and retry any pending entries.
+- * Uses exponential backoff and moves entries that exceed MAX_RETRIES to failed/.
++ * Retry pending queue entries.
+  */
+ export async function recoverPendingDeliveries(opts: {
+   deliver: DeliverFn;
+   log: RecoveryLogger;
+   cfg: OpenClawConfig;
+   stateDir?: string;
+-  /** Maximum wall-clock time for recovery in ms. Remaining entries are deferred to next restart. Default: 60 000. */
+   maxRecoveryMs?: number;
++  /** Timestamp of this gateway instance's startup. Entries enqueued after this time with no
++   *  prior attempt are skipped — they are actively being delivered on the direct path. */
++  startupCutoff?: number;
+ }): Promise<RecoverySummary> {
+-  const pending = await loadPendingDeliveries(opts.stateDir);
+-  if (pending.length === 0) {
+-    return { recovered: 0, failed: 0, skippedMaxRetries: 0, deferredBackoff: 0 };
++  if (resolveExpireAction(opts.cfg) === "fail") {
++    const db = getLifecycleDb(opts.stateDir);
++    const staleCutoff = Date.now() - resolveDeliveryMaxAgeMs(opts.cfg);
++    try {
++      db.prepare(
++        `UPDATE message_outbox
++           SET status='expired',
++               error_class='terminal',
++               last_error='expired: queued_at too old',
++               terminal_reason='expired',
++               completed_at=?
++         WHERE status IN ('queued','failed_retryable')
++           AND queued_at < ?`,
++      ).run(Date.now(), staleCutoff);
++    } catch (err) {
++      logVerbose(`delivery-queue: expiry update failed: ${String(err)}`);
++    }
++  }
++
++  // Non-final outbox rows (tool/block dispatches) are never recovered — the parent turn
++  // will be replayed from scratch. Mark orphaned non-final rows as terminal so they
++  // don't accumulate unboundedly. Two cases:
++  //   1. Pre-startup rows (crash survivors): queued_at < startupCutoff
++  //   2. Post-startup rows where the direct send already started (markAttemptStarted ran)
++  //      but ack/fail didn't complete: last_attempt_at IS NOT NULL
++  if (opts.startupCutoff !== undefined) {
++    const db = getLifecycleDb(opts.stateDir);
++    try {
++      db.prepare(
++        `UPDATE message_outbox
++           SET status='failed_terminal',
++               error_class='terminal',
++               terminal_reason='non-final dispatch pruned on recovery',
++               completed_at=?
++         WHERE status IN ('queued','failed_retryable')
++           AND dispatch_kind IS NOT NULL
++           AND dispatch_kind != 'final'
++           AND (queued_at < ? OR last_attempt_at IS NOT NULL)`,
++      ).run(Date.now(), opts.startupCutoff);
++    } catch (err) {
++      logVerbose(`delivery-queue: non-final terminalization failed: ${String(err)}`);
++    }
+   }
+ 
+-  // Process oldest first.
+-  pending.sort((a, b) => a.enqueuedAt - b.enqueuedAt);
++  const pending = await loadPendingDeliveries(opts.stateDir, opts.startupCutoff);
++
++  // Count entries excluded by the startup cutoff so the log reflects full activity.
++  let skippedStartupCutoff = 0;
++  if (opts.startupCutoff !== undefined) {
++    const db = getLifecycleDb(opts.stateDir);
++    try {
++      const row = db
++        .prepare(
++          `SELECT COUNT(*) AS cnt FROM message_outbox
++            WHERE status IN ('queued','failed_retryable')
++              AND (dispatch_kind IS NULL OR dispatch_kind = 'final')
++              AND next_attempt_at <= ?
++              AND queued_at >= ?
++              AND last_attempt_at IS NULL
++              AND attempt_count = 0`,
++        )
++        .get(Date.now(), opts.startupCutoff) as { cnt: number } | undefined;
++      skippedStartupCutoff = row?.cnt ?? 0;
++    } catch {
++      // non-fatal
++    }
++  }
+ 
++  if (pending.length === 0) {
++    return {
++      recovered: 0,
++      failed: 0,
++      skippedMaxRetries: 0,
++      deferredBackoff: 0,
++      skippedStartupCutoff,
++    };
++  }
+   opts.log.info(`Found ${pending.length} pending delivery entries — starting recovery`);
+ 
+   const deadline = Date.now() + (opts.maxRecoveryMs ?? 60_000);
+-
+   let recovered = 0;
+   let failed = 0;
+   let skippedMaxRetries = 0;
+@@ -304,31 +589,21 @@ export async function recoverPendingDeliveries(opts: {
+     const now = Date.now();
+     if (now >= deadline) {
+       const deferred = pending.length - recovered - failed - skippedMaxRetries - deferredBackoff;
+-      opts.log.warn(`Recovery time budget exceeded — ${deferred} entries deferred to next restart`);
++      opts.log.warn(
++        `Recovery time budget exceeded — ${deferred} entries deferred to next recovery pass`,
++      );
+       break;
+     }
+     if (entry.retryCount >= MAX_RETRIES) {
+-      opts.log.warn(
+-        `Delivery ${entry.id} exceeded max retries (${entry.retryCount}/${MAX_RETRIES}) — moving to failed/`,
+-      );
+-      try {
+-        await moveToFailed(entry.id, opts.stateDir);
+-      } catch (err) {
+-        opts.log.error(`Failed to move entry ${entry.id} to failed/: ${String(err)}`);
+-      }
++      await moveToFailed(entry.id, opts.stateDir);
+       skippedMaxRetries += 1;
+       continue;
+     }
+-
+-    const retryEligibility = isEntryEligibleForRecoveryRetry(entry, now);
+-    if (!retryEligibility.eligible) {
++    const eligibility = isEntryEligibleForRecoveryRetry(entry, now);
++    if (!eligibility.eligible) {
+       deferredBackoff += 1;
+-      opts.log.info(
+-        `Delivery ${entry.id} not ready for retry yet — backoff ${retryEligibility.remainingBackoffMs}ms remaining`,
+-      );
+       continue;
+     }
+-
+     try {
+       await opts.deliver({
+         cfg: opts.cfg,
+@@ -342,41 +617,25 @@ export async function recoverPendingDeliveries(opts: {
+         gifPlayback: entry.gifPlayback,
+         silent: entry.silent,
+         mirror: entry.mirror,
+-        skipQueue: true, // Prevent re-enqueueing during recovery
++        turnId: entry.turnId,
++        skipQueue: true,
+       });
+       await ackDelivery(entry.id, opts.stateDir);
+       recovered += 1;
+-      opts.log.info(`Recovered delivery ${entry.id} to ${entry.channel}:${entry.to}`);
+     } catch (err) {
+-      const errMsg = err instanceof Error ? err.message : String(err);
+-      if (isPermanentDeliveryError(errMsg)) {
+-        opts.log.warn(`Delivery ${entry.id} hit permanent error — moving to failed/: ${errMsg}`);
+-        try {
+-          await moveToFailed(entry.id, opts.stateDir);
+-        } catch (moveErr) {
+-          opts.log.error(`Failed to move entry ${entry.id} to failed/: ${String(moveErr)}`);
+-        }
+-        failed += 1;
+-        continue;
+-      }
+-      try {
+-        await failDelivery(entry.id, errMsg, opts.stateDir);
+-      } catch {
+-        // Best-effort update.
++      const message = err instanceof Error ? err.message : String(err);
++      if (isPermanentDeliveryError(message)) {
++        await moveToFailed(entry.id, opts.stateDir);
++      } else {
++        await failDelivery(entry.id, message, opts.stateDir);
+       }
+       failed += 1;
+-      opts.log.warn(`Retry failed for delivery ${entry.id}: ${errMsg}`);
+     }
+   }
+ 
+-  opts.log.info(
+-    `Delivery recovery complete: ${recovered} recovered, ${failed} failed, ${skippedMaxRetries} skipped (max retries), ${deferredBackoff} deferred (backoff)`,
+-  );
+-  return { recovered, failed, skippedMaxRetries, deferredBackoff };
++  return { recovered, failed, skippedMaxRetries, deferredBackoff, skippedStartupCutoff };
+ }
+ 
+-export { MAX_RETRIES };
+-
+ const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
+   /no conversation reference found/i,
+   /chat not found/i,
+@@ -392,3 +651,21 @@ const PERMANENT_ERROR_PATTERNS: readonly RegExp[] = [
+ export function isPermanentDeliveryError(error: string): boolean {
+   return PERMANENT_ERROR_PATTERNS.some((re) => re.test(error));
+ }
++
++export function pruneOutbox(ageMs: number, stateDir?: string): void {
++  if (!Number.isFinite(ageMs) || ageMs <= 0) {
++    logVerbose(`delivery-queue: pruneOutbox skipped — invalid ageMs: ${ageMs}`);
++    return;
++  }
++  const db = getLifecycleDb(stateDir);
++  const cutoff = Date.now() - ageMs;
++  try {
++    db.prepare(
++      `DELETE FROM message_outbox
++        WHERE status IN ('delivered','failed_terminal','expired')
++          AND COALESCE(completed_at, delivered_at, queued_at) < ?`,
++    ).run(cutoff);
++  } catch (err) {
++    logVerbose(`delivery-queue: pruneOutbox failed: ${String(err)}`);
++  }
++}
+diff --git a/src/infra/outbound/outbound.test.ts b/src/infra/outbound/outbound.test.ts
+index d950c0307439..3f0c8a9959b5 100644
+--- a/src/infra/outbound/outbound.test.ts
++++ b/src/infra/outbound/outbound.test.ts
+@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi }
+ import type { ReplyPayload } from "../../auto-reply/types.js";
+ import type { OpenClawConfig } from "../../config/config.js";
+ import { typedCases } from "../../test-utils/typed-cases.js";
++import { clearLifecycleDbCacheForTest, getLifecycleDb } from "../message-lifecycle/db.js";
+ import {
+   ackDelivery,
+   computeBackoffMs,
+@@ -54,6 +55,7 @@ describe("delivery-queue", () => {
+   });
+ 
+   afterAll(() => {
++    clearLifecycleDbCacheForTest();
+     if (!fixtureRoot) {
+       return;
+     }
+@@ -79,16 +81,9 @@ describe("delivery-queue", () => {
+         },
+         tmpDir,
+       );
+-
+-      // Entry file exists after enqueue.
+-      const queueDir = path.join(tmpDir, "delivery-queue");
+-      const files = fs.readdirSync(queueDir).filter((f) => f.endsWith(".json"));
+-      expect(files).toHaveLength(1);
+-      expect(files[0]).toBe(`${id}.json`);
+-
+-      // Entry contents are correct.
+-      const entry = JSON.parse(fs.readFileSync(path.join(queueDir, files[0]), "utf-8"));
+-      expect(entry).toMatchObject({
++      const entries = await loadPendingDeliveries(tmpDir);
++      expect(entries).toHaveLength(1);
++      expect(entries[0]).toMatchObject({
+         id,
+         channel: "whatsapp",
+         to: "+1555",
+@@ -102,11 +97,10 @@ describe("delivery-queue", () => {
+         },
+         retryCount: 0,
+       });
+-      expect(entry.payloads).toEqual([{ text: "hello" }]);
++      expect(entries[0]?.payloads).toEqual([{ text: "hello" }]);
+ 
+-      // Ack removes the file.
+       await ackDelivery(id, tmpDir);
+-      const remaining = fs.readdirSync(queueDir).filter((f) => f.endsWith(".json"));
++      const remaining = await loadPendingDeliveries(tmpDir);
+       expect(remaining).toHaveLength(0);
+     });
+ 
+@@ -128,17 +122,50 @@ describe("delivery-queue", () => {
+ 
+       await failDelivery(id, "connection refused", tmpDir);
+ 
+-      const queueDir = path.join(tmpDir, "delivery-queue");
+-      const entry = JSON.parse(fs.readFileSync(path.join(queueDir, `${id}.json`), "utf-8"));
+-      expect(entry.retryCount).toBe(1);
+-      expect(typeof entry.lastAttemptAt).toBe("number");
+-      expect(entry.lastAttemptAt).toBeGreaterThan(0);
+-      expect(entry.lastError).toBe("connection refused");
++      const db = getLifecycleDb(tmpDir);
++      const row = db
++        .prepare(
++          "SELECT attempt_count, last_attempt_at, last_error, status FROM message_outbox WHERE id=?",
++        )
++        .get(id) as
++        | {
++            attempt_count: number;
++            last_attempt_at: number | null;
++            last_error: string | null;
++            status: string;
++          }
++        | undefined;
++      expect(row?.attempt_count).toBe(1);
++      expect(typeof row?.last_attempt_at).toBe("number");
++      expect((row?.last_attempt_at ?? 0) > 0).toBe(true);
++      expect(row?.last_error).toBe("connection refused");
++      expect(row?.status).toBe("failed_retryable");
+     });
+   });
+ 
+   describe("moveToFailed", () => {
+-    it("moves entry to failed/ subdirectory", async () => {
++    it("marks entry as terminal failed", async () => {
++      const id = await enqueueDelivery(
++        {
++          channel: "slack",
++          to: "#general",
++          payloads: [{ text: "hi" }],
++        },
++        tmpDir,
++      );
++
++      await moveToFailed(id, tmpDir);
++
++      const remaining = await loadPendingDeliveries(tmpDir);
++      expect(remaining).toHaveLength(0);
++      const db = getLifecycleDb(tmpDir);
++      const row = db.prepare("SELECT status FROM message_outbox WHERE id=?").get(id) as
++        | { status: string }
++        | undefined;
++      expect(row?.status).toBe("failed_terminal");
++    });
++
++    it("does not overwrite already-acked rows", async () => {
+       const id = await enqueueDelivery(
+         {
+           channel: "slack",
+@@ -148,12 +175,23 @@ describe("delivery-queue", () => {
+         tmpDir,
+       );
+ 
++      // Simulate the live delivery path acking the row first
++      await ackDelivery(id, tmpDir);
++      const db = getLifecycleDb(tmpDir);
++      const beforeRow = db
++        .prepare("SELECT status, completed_at FROM message_outbox WHERE id=?")
++        .get(id) as { status: string; completed_at: number } | undefined;
++      expect(beforeRow?.status).toBe("delivered");
++      const ackTimestamp = beforeRow?.completed_at;
++
++      // Recovery worker tries to move to failed — should be a no-op
+       await moveToFailed(id, tmpDir);
+ 
+-      const queueDir = path.join(tmpDir, "delivery-queue");
+-      const failedDir = path.join(queueDir, "failed");
+-      expect(fs.existsSync(path.join(queueDir, `${id}.json`))).toBe(false);
+-      expect(fs.existsSync(path.join(failedDir, `${id}.json`))).toBe(true);
++      const afterRow = db
++        .prepare("SELECT status, completed_at FROM message_outbox WHERE id=?")
++        .get(id) as { status: string; completed_at: number } | undefined;
++      expect(afterRow?.status).toBe("delivered");
++      expect(afterRow?.completed_at).toBe(ackTimestamp);
+     });
+   });
+ 
+@@ -196,23 +234,20 @@ describe("delivery-queue", () => {
+       expect(entries).toHaveLength(2);
+     });
+ 
+-    it("backfills lastAttemptAt for legacy retry entries during load", async () => {
++    it("loads retry metadata for pending entries", async () => {
+       const id = await enqueueDelivery(
+         { channel: "whatsapp", to: "+1", payloads: [{ text: "legacy" }] },
+         tmpDir,
+       );
+-      const filePath = path.join(tmpDir, "delivery-queue", `${id}.json`);
+-      const legacyEntry = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+-      legacyEntry.retryCount = 2;
+-      delete legacyEntry.lastAttemptAt;
+-      fs.writeFileSync(filePath, JSON.stringify(legacyEntry), "utf-8");
+-
+-      const entries = await loadPendingDeliveries(tmpDir);
+-      expect(entries).toHaveLength(1);
+-      expect(entries[0]?.lastAttemptAt).toBe(entries[0]?.enqueuedAt);
+-
+-      const persisted = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+-      expect(persisted.lastAttemptAt).toBe(persisted.enqueuedAt);
++      await failDelivery(id, "first error", tmpDir);
++      await failDelivery(id, "second error", tmpDir);
++
++      const db = getLifecycleDb(tmpDir);
++      const row = db
++        .prepare("SELECT attempt_count, last_attempt_at FROM message_outbox WHERE id=?")
++        .get(id) as { attempt_count: number; last_attempt_at: number | null } | undefined;
++      expect(row?.attempt_count).toBe(2);
++      expect(typeof row?.last_attempt_at).toBe("number");
+     });
+   });
+ 
+@@ -278,35 +313,61 @@ describe("delivery-queue", () => {
+   describe("recoverPendingDeliveries", () => {
+     const baseCfg = {};
+     const createLog = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
++    // Age all queued entries to simulate having survived a gateway crash.
++    // Without aging, entries have next_attempt_at = now and might be picked up
++    // before the direct delivery path finishes (startup-cutoff prevents this in prod).
++    const makeEntriesEligible = () => {
++      const db = getLifecycleDb(tmpDir);
++      const past = Date.now() - 10_000;
++      db.prepare(
++        `UPDATE message_outbox SET queued_at=?, next_attempt_at=? WHERE status='queued'`,
++      ).run(past, past);
++    };
+     const enqueueCrashRecoveryEntries = async () => {
+       await enqueueDelivery({ channel: "whatsapp", to: "+1", payloads: [{ text: "a" }] }, tmpDir);
+       await enqueueDelivery({ channel: "telegram", to: "2", payloads: [{ text: "b" }] }, tmpDir);
++      // Age entries to simulate having survived a gateway crash — they are unambiguously
++      // before the startup cutoff and must not be mistaken for live deliveries.
++      makeEntriesEligible();
+     };
+     const setEntryState = (
+       id: string,
+-      state: { retryCount: number; lastAttemptAt?: number; enqueuedAt?: number },
++      state: {
++        retryCount: number;
++        lastAttemptAt?: number;
++        enqueuedAt?: number;
++        nextAttemptAt?: number;
++      },
+     ) => {
+-      const filePath = path.join(tmpDir, "delivery-queue", `${id}.json`);
+-      const entry = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+-      entry.retryCount = state.retryCount;
+-      if (state.lastAttemptAt === undefined) {
+-        delete entry.lastAttemptAt;
+-      } else {
+-        entry.lastAttemptAt = state.lastAttemptAt;
+-      }
+-      if (state.enqueuedAt !== undefined) {
+-        entry.enqueuedAt = state.enqueuedAt;
+-      }
+-      fs.writeFileSync(filePath, JSON.stringify(entry), "utf-8");
++      const db = getLifecycleDb(tmpDir);
++      const now = Date.now();
++      db.prepare(
++        `UPDATE message_outbox
++           SET attempt_count=?,
++               last_attempt_at=?,
++               queued_at=?,
++               next_attempt_at=?,
++               status=?
++         WHERE id=?`,
++      ).run(
++        state.retryCount,
++        state.lastAttemptAt ?? null,
++        state.enqueuedAt ?? now,
++        state.nextAttemptAt ?? now,
++        state.retryCount > 0 ? "failed_retryable" : "queued",
++        id,
++      );
+     };
+     const runRecovery = async ({
+       deliver,
+       log = createLog(),
+       maxRecoveryMs,
++      startupCutoff,
+     }: {
+       deliver: ReturnType<typeof vi.fn>;
+       log?: ReturnType<typeof createLog>;
+       maxRecoveryMs?: number;
++      startupCutoff?: number;
+     }) => {
+       const result = await recoverPendingDeliveries({
+         deliver: deliver as DeliverFn,
+@@ -314,6 +375,7 @@ describe("delivery-queue", () => {
+         cfg: baseCfg,
+         stateDir: tmpDir,
+         ...(maxRecoveryMs === undefined ? {} : { maxRecoveryMs }),
++        ...(startupCutoff === undefined ? {} : { startupCutoff }),
+       });
+       return { result, log };
+     };
+@@ -322,7 +384,7 @@ describe("delivery-queue", () => {
+       // Manually create queue entries as if gateway crashed before delivery.
+       await enqueueCrashRecoveryEntries();
+       const deliver = vi.fn().mockResolvedValue([]);
+-      const { result } = await runRecovery({ deliver });
++      const { result } = await runRecovery({ deliver, startupCutoff: Date.now() });
+ 
+       expect(deliver).toHaveBeenCalledTimes(2);
+       expect(result.recovered).toBe(2);
+@@ -335,7 +397,26 @@ describe("delivery-queue", () => {
+       expect(remaining).toHaveLength(0);
+     });
+ 
+-    it("moves entries that exceeded max retries to failed/", async () => {
++    it("skips freshly-enqueued entries when startupCutoff is set (prevents duplicate delivery)", async () => {
++      // Regression: outbox worker fired within 1s of enqueue and double-delivered because
++      // fresh entries (retryCount=0, no lastAttemptAt) were immediately eligible.
++      // With startupCutoff set, entries enqueued after startup are skipped unless they have
++      // a prior attempt recorded (i.e., a transient failure that needs retry).
++      const startupCutoff = Date.now();
++      await enqueueDelivery(
++        { channel: "whatsapp", to: "+1", payloads: [{ text: "live" }] },
++        tmpDir,
++      );
++
++      const deliver = vi.fn().mockResolvedValue([]);
++      const { result } = await runRecovery({ deliver, startupCutoff });
++
++      expect(deliver).not.toHaveBeenCalled();
++      expect(result.recovered).toBe(0);
++      expect(result.deferredBackoff).toBe(0);
++    });
++
++    it("moves entries that exceeded max retries to terminal failed status", async () => {
+       // Create an entry and manually set retryCount to MAX_RETRIES.
+       const id = await enqueueDelivery(
+         { channel: "whatsapp", to: "+1", payloads: [{ text: "a" }] },
+@@ -350,9 +431,11 @@ describe("delivery-queue", () => {
+       expect(result.skippedMaxRetries).toBe(1);
+       expect(result.deferredBackoff).toBe(0);
+ 
+-      // Entry should be in failed/ directory.
+-      const failedDir = path.join(tmpDir, "delivery-queue", "failed");
+-      expect(fs.existsSync(path.join(failedDir, `${id}.json`))).toBe(true);
++      const db = getLifecycleDb(tmpDir);
++      const row = db.prepare("SELECT status FROM message_outbox WHERE id=?").get(id) as
++        | { status: string }
++        | undefined;
++      expect(row?.status).toBe("failed_terminal");
+     });
+ 
+     it("increments retryCount on failed recovery attempt", async () => {
+@@ -364,14 +447,18 @@ describe("delivery-queue", () => {
+       expect(result.failed).toBe(1);
+       expect(result.recovered).toBe(0);
+ 
+-      // Entry should still be in queue with incremented retryCount.
+-      const entries = await loadPendingDeliveries(tmpDir);
+-      expect(entries).toHaveLength(1);
+-      expect(entries[0].retryCount).toBe(1);
+-      expect(entries[0].lastError).toBe("network down");
++      const db = getLifecycleDb(tmpDir);
++      const row = db
++        .prepare(
++          "SELECT attempt_count, last_error, status FROM message_outbox WHERE id IS NOT NULL",
++        )
++        .get() as { attempt_count: number; last_error: string | null; status: string } | undefined;
++      expect(row?.attempt_count).toBe(1);
++      expect(row?.last_error).toBe("network down");
++      expect(row?.status).toBe("failed_retryable");
+     });
+ 
+-    it("moves entries to failed/ immediately on permanent delivery errors", async () => {
++    it("moves entries to failed_terminal immediately on permanent delivery errors", async () => {
+       const id = await enqueueDelivery(
+         { channel: "msteams", to: "user:abc", payloads: [{ text: "hi" }] },
+         tmpDir,
+@@ -386,9 +473,12 @@ describe("delivery-queue", () => {
+       expect(result.recovered).toBe(0);
+       const remaining = await loadPendingDeliveries(tmpDir);
+       expect(remaining).toHaveLength(0);
+-      const failedDir = path.join(tmpDir, "delivery-queue", "failed");
+-      expect(fs.existsSync(path.join(failedDir, `${id}.json`))).toBe(true);
+-      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("permanent error"));
++      const db = getLifecycleDb(tmpDir);
++      const row = db.prepare("SELECT status, error_class FROM message_outbox WHERE id=?").get(id) as
++        | { status: string; error_class: string | null }
++        | undefined;
++      expect(row?.status).toBe("failed_terminal");
++      expect(row?.error_class).toBe("terminal");
+     });
+ 
+     it("passes skipQueue: true to prevent re-enqueueing during recovery", async () => {
+@@ -456,7 +546,9 @@ describe("delivery-queue", () => {
+       expect(remaining).toHaveLength(3);
+ 
+       // Should have logged a warning about deferred entries.
+-      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("deferred to next restart"));
++      expect(log.warn).toHaveBeenCalledWith(
++        expect.stringContaining("deferred to next recovery pass"),
++      );
+     });
+ 
+     it("defers entries until backoff becomes eligible", async () => {
+@@ -467,7 +559,7 @@ describe("delivery-queue", () => {
+       setEntryState(id, { retryCount: 3, lastAttemptAt: Date.now() });
+ 
+       const deliver = vi.fn().mockResolvedValue([]);
+-      const { result, log } = await runRecovery({
++      const { result } = await runRecovery({
+         deliver,
+         maxRecoveryMs: 60_000,
+       });
+@@ -478,12 +570,13 @@ describe("delivery-queue", () => {
+         failed: 0,
+         skippedMaxRetries: 0,
+         deferredBackoff: 1,
++        skippedStartupCutoff: 0,
+       });
+ 
+       const remaining = await loadPendingDeliveries(tmpDir);
+       expect(remaining).toHaveLength(1);
+ 
+-      expect(log.info).toHaveBeenCalledWith(expect.stringContaining("not ready for retry yet"));
++      expect(result.deferredBackoff).toBe(1);
+     });
+ 
+     it("continues past high-backoff entries and recovers ready entries behind them", async () => {
+@@ -508,6 +601,7 @@ describe("delivery-queue", () => {
+         failed: 0,
+         skippedMaxRetries: 0,
+         deferredBackoff: 1,
++        skippedStartupCutoff: 0,
+       });
+       expect(deliver).toHaveBeenCalledTimes(1);
+       expect(deliver).toHaveBeenCalledWith(
+@@ -537,6 +631,7 @@ describe("delivery-queue", () => {
+         failed: 0,
+         skippedMaxRetries: 0,
+         deferredBackoff: 1,
++        skippedStartupCutoff: 0,
+       });
+       expect(firstDeliver).not.toHaveBeenCalled();
+ 
+@@ -548,6 +643,7 @@ describe("delivery-queue", () => {
+         failed: 0,
+         skippedMaxRetries: 0,
+         deferredBackoff: 0,
++        skippedStartupCutoff: 0,
+       });
+       expect(secondDeliver).toHaveBeenCalledTimes(1);
+ 
+@@ -566,6 +662,7 @@ describe("delivery-queue", () => {
+         failed: 0,
+         skippedMaxRetries: 0,
+         deferredBackoff: 0,
++        skippedStartupCutoff: 0,
+       });
+       expect(deliver).not.toHaveBeenCalled();
+     });

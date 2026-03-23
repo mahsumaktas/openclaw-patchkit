@@ -1,7 +1,7 @@
 {
   "version": "3",
   "base_version": "v2026.3.1",
-  "last_updated": "2026-03-03",
+  "last_updated": "2026-03-23",
   "categories": {
     "security": {
       "description": "Security patches — never remove on upgrade",
@@ -1444,6 +1444,162 @@
       "last_test_date": "2026-03-03",
       "author": "scoootscooob",
       "scan_score": 78
+    },
+    {
+      "pr": 40221,
+      "title": "fix: suppress undici TLS session null-deref as transient uncaughtException",
+      "category": "stability",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "joelnishanth"
+    },
+    {
+      "pr": 28258,
+      "title": "fix: crash recovery for Anthropic thinking blocks (#25194)",
+      "category": "stability",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "explainanalyze"
+    },
+    {
+      "pr": 33422,
+      "title": "Security hardening: operator safety guardrails (opt-in, backwards-compatible)",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "Rohail-Suii"
+    },
+    {
+      "pr": 29245,
+      "title": "feat(approvals): harden telegram exec approval lifecycle and tool gating",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "trstoyan"
+    },
+    {
+      "pr": 39471,
+      "title": "fix(database): add WAL journal mode and transient SQLite error handling",
+      "category": "memory",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "liangruochong44-ui"
+    },
+    {
+      "pr": 35145,
+      "title": "fix(discord): catch unhandled promise rejection in gateway registerClient (#34592)",
+      "category": "gateway",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "lml2468"
+    },
+    {
+      "pr": 40400,
+      "title": "fix(memory): harden durable memory writes",
+      "category": "memory",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "SmithLabsLLC"
+    },
+    {
+      "pr": 33423,
+      "title": "fix(cron): ensure nextRunAtMs is always after lastRunAtMs for cron jobs",
+      "category": "stability",
+      "risk": "low",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "arkyu2077"
+    },
+    {
+      "pr": 30009,
+      "title": "feat(outbox): write-ahead outbox with recovery worker and delivery tracking",
+      "category": "gateway",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "nohat"
+    },
+    {
+      "pr": 38812,
+      "title": "fix(agents): add safety valve for consecutive tool-only turns and API error notification",
+      "category": "security",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "imwyvern"
+    },
+    {
+      "pr": 35738,
+      "title": "fix(daemon): detect Homebrew node@ paths on macOS",
+      "category": "gateway",
+      "risk": "medium",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "j30231"
+    },
+    {
+      "pr": 33898,
+      "title": "feat: add compaction.onFailure policy (halt/continue/reset)",
+      "category": "session",
+      "risk": "high",
+      "status": "active",
+      "tested_versions": [
+        "v2026.3.13"
+      ],
+      "added_date": "2026-03-23",
+      "last_test_date": "2026-03-23",
+      "author": "lml2468"
     }
   ],
   "fixes": [

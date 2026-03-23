@@ -1,0 +1,226 @@
+diff --git a/src/cli/run-main.ts b/src/cli/run-main.ts
+index c0673ddf2af5..78865ed9c98c 100644
+--- a/src/cli/run-main.ts
++++ b/src/cli/run-main.ts
+@@ -6,7 +6,10 @@ import { formatUncaughtError } from "../infra/errors.js";
+ import { isMainModule } from "../infra/is-main.js";
+ import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
+ import { assertSupportedRuntime } from "../infra/runtime-guard.js";
+-import { installUnhandledRejectionHandler } from "../infra/unhandled-rejections.js";
++import {
++  installUnhandledRejectionHandler,
++  isTransientNetworkError,
++} from "../infra/unhandled-rejections.js";
+ import { enableConsoleCapture } from "../logging.js";
+ import { getCommandPathWithRootOptions, getPrimaryCommand, hasHelpOrVersion } from "./argv.js";
+ import { applyCliProfileEnv, parseCliProfileArgs } from "./profile.js";
+@@ -107,6 +110,18 @@ export async function runCli(argv: string[] = process.argv) {
+     installUnhandledRejectionHandler();
+ 
+     process.on("uncaughtException", (error) => {
++      // Transient network errors (e.g. undici TLS session null-deref on reconnect)
++      // should not take down the gateway — log and continue.
++      if (isTransientNetworkError(error)) {
++        console.warn(
++          "[openclaw] Suppressed transient uncaught exception:",
++          formatUncaughtError(error),
++        );
++        // Ensure one-shot CLI commands still surface a non-zero status if the
++        // event loop drains; long-running gateway processes keep running normally.
++        process.exitCode = 1;
++        return;
++      }
+       console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
+       process.exit(1);
+     });
+diff --git a/src/index.ts b/src/index.ts
+index 61d96ccee33f..af3af704fb85 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -28,7 +28,10 @@ import {
+   PortInUseError,
+ } from "./infra/ports.js";
+ import { assertSupportedRuntime } from "./infra/runtime-guard.js";
+-import { installUnhandledRejectionHandler } from "./infra/unhandled-rejections.js";
++import {
++  installUnhandledRejectionHandler,
++  isTransientNetworkError,
++} from "./infra/unhandled-rejections.js";
+ import { enableConsoleCapture } from "./logging.js";
+ import { runCommandWithTimeout, runExec } from "./process/exec.js";
+ import { assertWebChannel, normalizeE164, toWhatsappJid } from "./utils.js";
+@@ -82,6 +85,18 @@ if (isMain) {
+   installUnhandledRejectionHandler();
+ 
+   process.on("uncaughtException", (error) => {
++    // Transient network errors (e.g. undici TLS session null-deref on reconnect)
++    // should not take down the gateway — log and continue.
++    if (isTransientNetworkError(error)) {
++      console.warn(
++        "[openclaw] Suppressed transient uncaught exception:",
++        formatUncaughtError(error),
++      );
++      // Ensure one-shot CLI commands still surface a non-zero status if the
++      // event loop drains; long-running gateway processes keep running normally.
++      process.exitCode = 1;
++      return;
++    }
+     console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
+     process.exit(1);
+   });
+diff --git a/src/infra/unhandled-rejections.test.ts b/src/infra/unhandled-rejections.test.ts
+index 5df7ee6949e3..0c538a7ca3a0 100644
+--- a/src/infra/unhandled-rejections.test.ts
++++ b/src/infra/unhandled-rejections.test.ts
+@@ -1,5 +1,9 @@
+ import { describe, expect, it } from "vitest";
+-import { isAbortError, isTransientNetworkError } from "./unhandled-rejections.js";
++import {
++  isAbortError,
++  isTransientNetworkError,
++  isTlsSocketNullDeref,
++} from "./unhandled-rejections.js";
+ 
+ describe("isAbortError", () => {
+   it("returns true for error with name AbortError", () => {
+@@ -179,4 +183,91 @@ describe("isTransientNetworkError", () => {
+     const error = new AggregateError([new Error("regular error")], "Multiple errors");
+     expect(isTransientNetworkError(error)).toBe(false);
+   });
++
++  it("returns true for undici TLS session null-deref TypeError (Node 18+ message)", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
++    err.stack = [
++      "TypeError: Cannot read properties of null (reading 'setSession')",
++      "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
++      "    at Object.connect (node:_tls_wrap:1826:13)",
++      "    at Client.connect (undici/lib/core/connect.js:70:20)",
++    ].join("\n");
++    expect(isTransientNetworkError(err)).toBe(true);
++  });
++
++  it("returns true for undici TLS session null-deref TypeError (Node <18 message)", () => {
++    const err = new TypeError("Cannot read property 'setSession' of null");
++    err.stack = [
++      "TypeError: Cannot read property 'setSession' of null",
++      "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
++      "    at Object.connect (node:_tls_wrap:1826:13)",
++    ].join("\n");
++    expect(isTransientNetworkError(err)).toBe(true);
++  });
++
++  it("returns false for unrelated TypeErrors that mention null", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'toString')");
++    err.stack = [
++      "TypeError: Cannot read properties of null (reading 'toString')",
++      "    at someAppCode (/app/src/foo.ts:10:5)",
++    ].join("\n");
++    expect(isTransientNetworkError(err)).toBe(false);
++  });
++});
++
++describe("isTlsSocketNullDeref", () => {
++  it("returns true for Node 18+ TLS setSession null-deref", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
++    err.stack = [
++      "TypeError: Cannot read properties of null (reading 'setSession')",
++      "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
++      "    at Object.connect (node:_tls_wrap:1826:13)",
++    ].join("\n");
++    expect(isTlsSocketNullDeref(err)).toBe(true);
++  });
++
++  it("returns true for Node <18 TLS setSession null-deref", () => {
++    const err = new TypeError("Cannot read property 'setSession' of null");
++    err.stack = [
++      "TypeError: Cannot read property 'setSession' of null",
++      "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
++    ].join("\n");
++    expect(isTlsSocketNullDeref(err)).toBe(true);
++  });
++
++  it("returns false when stack has no _tls_wrap or TLSSocket reference", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
++    err.stack = [
++      "TypeError: Cannot read properties of null (reading 'setSession')",
++      "    at someApp (/app/src/foo.ts:5:1)",
++    ].join("\n");
++    expect(isTlsSocketNullDeref(err)).toBe(false);
++  });
++
++  it("returns false for non-TypeError errors", () => {
++    const err = new Error("Cannot read properties of null (reading 'setSession')");
++    (err as unknown as { stack: string }).stack =
++      "Error\n    at TLSSocket.setSession (node:_tls_wrap:1132:16)";
++    expect(isTlsSocketNullDeref(err)).toBe(false);
++  });
++
++  it("returns true when stack contains only node:_tls_wrap (no TLSSocket.setSession frame)", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
++    err.stack = [
++      "TypeError: Cannot read properties of null (reading 'setSession')",
++      "    at Object.connect (node:_tls_wrap:1826:13)",
++      "    at Client.connect (undici/lib/core/connect.js:70:20)",
++    ].join("\n");
++    expect(isTlsSocketNullDeref(err)).toBe(true);
++  });
++
++  it("returns false for TypeErrors unrelated to setSession", () => {
++    const err = new TypeError("Cannot read properties of null (reading 'length')");
++    err.stack = "TypeError\n    at TLSSocket.foo (node:_tls_wrap:10:1)";
++    expect(isTlsSocketNullDeref(err)).toBe(false);
++  });
++
++  it.each([null, undefined, "string", 42])("returns false for non-Error input %#", (value) => {
++    expect(isTlsSocketNullDeref(value)).toBe(false);
++  });
+ });
+diff --git a/src/infra/unhandled-rejections.ts b/src/infra/unhandled-rejections.ts
+index 44a6bb22584b..3e508fd6208d 100644
+--- a/src/infra/unhandled-rejections.ts
++++ b/src/infra/unhandled-rejections.ts
+@@ -77,6 +77,32 @@ function isWrappedFetchFailedMessage(message: string): boolean {
+   return /:\s*fetch failed$/.test(message);
+ }
+ 
++/**
++ * Detects the undici TLS session null-dereference crash that occurs when undici's
++ * reconnect path calls tls.connect() with a stale WeakRef-cached session whose
++ * internal _handle has already been destroyed.
++ *
++ * Stack: TLSSocket.setSession (node:_tls_wrap) ← Object.connect ← undici connect.js
++ *
++ * This is a transient condition — the session cache entry becomes invalid after
++ * a socket close under concurrent load; the next request will succeed without
++ * a cached session. Exiting the process is unnecessary and causes crash-loops
++ * when the network is still unstable at restart.
++ */
++export function isTlsSocketNullDeref(err: unknown): boolean {
++  if (!(err instanceof TypeError)) {
++    return false;
++  }
++  const msg = err.message ?? "";
++  // Node 18+: "Cannot read properties of null (reading 'setSession')"
++  // Node <18:  "Cannot read property 'setSession' of null"
++  if (!msg.includes("setSession")) {
++    return false;
++  }
++  const stack = err.stack ?? "";
++  return stack.includes("TLSSocket.setSession") || stack.includes("node:_tls_wrap");
++}
++
+ function getErrorCause(err: unknown): unknown {
+   if (!err || typeof err !== "object") {
+     return undefined;
+@@ -171,6 +197,11 @@ export function isTransientNetworkError(err: unknown): boolean {
+       return true;
+     }
+ 
++    // undici TLS session null dereference during socket reconnect — transient
++    if (isTlsSocketNullDeref(candidate)) {
++      return true;
++    }
++
+     if (!candidate || typeof candidate !== "object") {
+       continue;
+     }

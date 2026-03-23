@@ -1,0 +1,3550 @@
+diff --git a/apps/macos/Sources/OpenClawProtocol/GatewayModels.swift b/apps/macos/Sources/OpenClawProtocol/GatewayModels.swift
+index 6d138c70525d..eb2ceeb7f91d 100644
+--- a/apps/macos/Sources/OpenClawProtocol/GatewayModels.swift
++++ b/apps/macos/Sources/OpenClawProtocol/GatewayModels.swift
+@@ -2975,18 +2975,22 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
+ public struct ExecApprovalResolveParams: Codable, Sendable {
+     public let id: String
+     public let decision: String
++    public let audit: [String: AnyCodable]?
+ 
+     public init(
+         id: String,
+-        decision: String)
++        decision: String,
++        audit: [String: AnyCodable]?)
+     {
+         self.id = id
+         self.decision = decision
++        self.audit = audit
+     }
+ 
+     private enum CodingKeys: String, CodingKey {
+         case id
+         case decision
++        case audit
+     }
+ }
+ 
+diff --git a/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift b/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
+index 6d138c70525d..eb2ceeb7f91d 100644
+--- a/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
++++ b/apps/shared/OpenClawKit/Sources/OpenClawProtocol/GatewayModels.swift
+@@ -2975,18 +2975,22 @@ public struct ExecApprovalRequestParams: Codable, Sendable {
+ public struct ExecApprovalResolveParams: Codable, Sendable {
+     public let id: String
+     public let decision: String
++    public let audit: [String: AnyCodable]?
+ 
+     public init(
+         id: String,
+-        decision: String)
++        decision: String,
++        audit: [String: AnyCodable]?)
+     {
+         self.id = id
+         self.decision = decision
++        self.audit = audit
+     }
+ 
+     private enum CodingKeys: String, CodingKey {
+         case id
+         case decision
++        case audit
+     }
+ }
+ 
+diff --git a/docs/tools/exec-approvals.md b/docs/tools/exec-approvals.md
+index 45141e6d735e..51982971bf34 100644
+--- a/docs/tools/exec-approvals.md
++++ b/docs/tools/exec-approvals.md
+@@ -306,6 +306,27 @@ Reply in chat:
+ /approve <id> deny
+ ```
+ 
++## Tool approvals on protected files
++
++You can use `approvals.tools` to require operator approval for mutating tool calls such as
++`edit`, `write`, or `apply_patch`.
++
++Important behavior:
++
++- Approval and filesystem policy are separate checks.
++- An operator can approve a tool call, but the call still fails if OS/file permissions block the path.
++- For `edit` / `write` / `apply_patch`, permission-denied failures (`EACCES`, `EPERM`, `permission denied`)
++  are normalized to:
++  `blocked by filesystem protection policy (permission denied)`
++- This normalization is only for user-facing error text; it does not bypass protections.
++- Other tools and non-permission errors are left unchanged.
++
++Typical scenarios:
++
++- Editing a locked file (`chmod 444` or root-owned file).
++- Writing into a read-only or restricted directory.
++- Applying a patch that touches protected files.
++
+ ### macOS IPC flow
+ 
+ ```
+diff --git a/src/agents/bash-tools.exec-approval-request.test.ts b/src/agents/bash-tools.exec-approval-request.test.ts
+index 7911b9bdf2b2..84d3e1358bbd 100644
+--- a/src/agents/bash-tools.exec-approval-request.test.ts
++++ b/src/agents/bash-tools.exec-approval-request.test.ts
+@@ -174,4 +174,35 @@ describe("requestExecApprovalDecision", () => {
+     expect(result).toBe("deny");
+     expect(vi.mocked(callGatewayTool).mock.calls).toHaveLength(1);
+   });
++
++  it("passes custom approval timeout when provided", async () => {
++    vi.mocked(callGatewayTool)
++      .mockResolvedValueOnce({
++        status: "accepted",
++        id: "approval-id",
++        expiresAtMs: DEFAULT_APPROVAL_TIMEOUT_MS,
++      })
++      .mockResolvedValueOnce({ decision: "allow-once" });
++
++    await expect(
++      requestExecApprovalDecision({
++        id: "approval-id",
++        command: "echo hi",
++        cwd: "/tmp",
++        host: "gateway",
++        security: "allowlist",
++        ask: "always",
++        timeoutMs: 45_000,
++      }),
++    ).resolves.toBe("allow-once");
++
++    expect(callGatewayTool).toHaveBeenCalledWith(
++      "exec.approval.request",
++      { timeoutMs: DEFAULT_APPROVAL_REQUEST_TIMEOUT_MS },
++      expect.objectContaining({
++        timeoutMs: 45_000,
++      }),
++      { expectFinal: false },
++    );
++  });
+ });
+diff --git a/src/agents/bash-tools.exec-approval-request.ts b/src/agents/bash-tools.exec-approval-request.ts
+index 7c28827c051c..9c85cba98789 100644
+--- a/src/agents/bash-tools.exec-approval-request.ts
++++ b/src/agents/bash-tools.exec-approval-request.ts
+@@ -23,6 +23,7 @@ export type RequestExecApprovalDecisionParams = {
+   turnSourceTo?: string;
+   turnSourceAccountId?: string;
+   turnSourceThreadId?: string | number;
++  timeoutMs?: number;
+ };
+ 
+ type ExecApprovalRequestToolParams = RequestExecApprovalDecisionParams & {
+@@ -33,6 +34,12 @@ type ExecApprovalRequestToolParams = RequestExecApprovalDecisionParams & {
+ function buildExecApprovalRequestToolParams(
+   params: RequestExecApprovalDecisionParams,
+ ): ExecApprovalRequestToolParams {
++  const timeoutMs =
++    typeof params.timeoutMs === "number" &&
++    Number.isFinite(params.timeoutMs) &&
++    params.timeoutMs > 0
++      ? Math.floor(params.timeoutMs)
++      : DEFAULT_APPROVAL_TIMEOUT_MS;
+   return {
+     id: params.id,
+     command: params.command,
+@@ -51,7 +58,7 @@ function buildExecApprovalRequestToolParams(
+     turnSourceTo: params.turnSourceTo,
+     turnSourceAccountId: params.turnSourceAccountId,
+     turnSourceThreadId: params.turnSourceThreadId,
+-    timeoutMs: DEFAULT_APPROVAL_TIMEOUT_MS,
++    timeoutMs,
+     twoPhase: true,
+   };
+ }
+@@ -166,6 +173,7 @@ type HostExecApprovalParams = {
+   turnSourceTo?: string;
+   turnSourceAccountId?: string;
+   turnSourceThreadId?: string | number;
++  timeoutMs?: number;
+ };
+ 
+ type ExecApprovalRequesterContext = {
+@@ -221,6 +229,7 @@ function buildHostApprovalDecisionParams(
+     }),
+     resolvedPath: params.resolvedPath,
+     ...buildExecApprovalTurnSourceContext(params),
++    timeoutMs: params.timeoutMs,
+   };
+ }
+ 
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index 63898d4dfe0d..dbf5db2ca846 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -924,6 +924,14 @@ export async function runEmbeddedAttempt(
+               sessionId: params.sessionId,
+               runId: params.runId,
+               loopDetection: clientToolLoopDetection,
++              approvals: {
++                tools: params.config?.approvals?.tools,
++                turnSourceChannel: params.messageChannel ?? params.messageProvider,
++                turnSourceTo: params.currentChannelId ?? params.messageTo,
++                turnSourceAccountId: params.agentAccountId,
++                turnSourceThreadId: params.currentThreadTs ?? params.messageThreadId,
++                cwd: effectiveWorkspace,
++              },
+             },
+           )
+         : [];
+diff --git a/src/agents/pi-embedded-runner/run/payloads.test.ts b/src/agents/pi-embedded-runner/run/payloads.test.ts
+index ee8acd1d43e6..9e20af633ba2 100644
+--- a/src/agents/pi-embedded-runner/run/payloads.test.ts
++++ b/src/agents/pi-embedded-runner/run/payloads.test.ts
+@@ -61,6 +61,23 @@ describe("buildEmbeddedRunPayloads tool-error warnings", () => {
+     });
+   });
+ 
++  it("rewrites edit permission-denied details to a filesystem protection message", () => {
++    const payloads = buildPayloads({
++      lastToolError: {
++        toolName: "edit",
++        error:
++          "EACCES: permission denied, open '/home/sumix/.openclaw/workspace/policy-protected/LOCKED.md'",
++      },
++      verboseLevel: "on",
++    });
++
++    expectSingleToolErrorPayload(payloads, {
++      title: "Edit",
++      detail: "blocked by filesystem protection policy (permission denied)",
++      absentDetail: "EACCES: permission denied",
++    });
++  });
++
+   it("suppresses sessions_send errors to avoid leaking transient relay failures", () => {
+     const payloads = buildPayloads({
+       lastToolError: { toolName: "sessions_send", error: "delivery timeout" },
+diff --git a/src/agents/pi-embedded-runner/run/payloads.ts b/src/agents/pi-embedded-runner/run/payloads.ts
+index c3c878454513..7db12d24e314 100644
+--- a/src/agents/pi-embedded-runner/run/payloads.ts
++++ b/src/agents/pi-embedded-runner/run/payloads.ts
+@@ -52,6 +52,29 @@ function isVerboseToolDetailEnabled(level?: VerboseLevel): boolean {
+   return level === "on" || level === "full";
+ }
+ 
++function formatToolErrorDetailForWarning(
++  toolName: string,
++  error: string | undefined,
++): string | null {
++  if (!error) {
++    return null;
++  }
++  const normalizedToolName = toolName.trim().toLowerCase();
++  const normalizedError = error.toLowerCase();
++  const fileMutatingTool =
++    normalizedToolName === "edit" ||
++    normalizedToolName === "write" ||
++    normalizedToolName === "apply_patch";
++  const permissionDenied =
++    normalizedError.includes("eacces") ||
++    normalizedError.includes("eperm") ||
++    normalizedError.includes("permission denied");
++  if (fileMutatingTool && permissionDenied) {
++    return "blocked by filesystem protection policy (permission denied)";
++  }
++  return error;
++}
++
+ function resolveToolErrorWarningPolicy(params: {
+   lastToolError: LastToolError;
+   hasUserFacingReply: boolean;
+@@ -292,10 +315,14 @@ export function buildEmbeddedRunPayloads(params: {
+         params.lastToolError.meta ? [params.lastToolError.meta] : undefined,
+         { markdown: useMarkdown },
+       );
+-      const errorSuffix =
++      const detailText =
+         warningPolicy.includeDetails && params.lastToolError.error
+-          ? `: ${params.lastToolError.error}`
+-          : "";
++          ? formatToolErrorDetailForWarning(
++              params.lastToolError.toolName,
++              params.lastToolError.error,
++            )
++          : null;
++      const errorSuffix = warningPolicy.includeDetails && detailText ? `: ${detailText}` : "";
+       const warningText = `⚠️ ${toolSummary} failed${errorSuffix}`;
+       const normalizedWarning = normalizeTextForComparison(warningText);
+       const duplicateWarning = normalizedWarning
+diff --git a/src/agents/pi-embedded-subscribe.handlers.tools.ts b/src/agents/pi-embedded-subscribe.handlers.tools.ts
+index 8abd9469bbc9..135ef84e8f31 100644
+--- a/src/agents/pi-embedded-subscribe.handlers.tools.ts
++++ b/src/agents/pi-embedded-subscribe.handlers.tools.ts
+@@ -326,7 +326,7 @@ export async function handleToolExecutionEnd(
+   ctx.state.toolMetaById.delete(toolCallId);
+   ctx.state.toolSummaryById.delete(toolCallId);
+   if (isToolError) {
+-    const errorMessage = extractToolErrorMessage(sanitizedResult);
++    const errorMessage = extractToolErrorMessage(sanitizedResult, toolName);
+     ctx.state.lastToolError = {
+       toolName,
+       meta,
+@@ -439,7 +439,7 @@ export async function handleToolExecutionEnd(
+       runId,
+       toolCallId,
+       result: sanitizedResult,
+-      error: isToolError ? extractToolErrorMessage(sanitizedResult) : undefined,
++      error: isToolError ? extractToolErrorMessage(sanitizedResult, toolName) : undefined,
+       durationMs,
+     };
+     void hookRunnerAfter
+diff --git a/src/agents/pi-embedded-subscribe.tools.test.ts b/src/agents/pi-embedded-subscribe.tools.test.ts
+index 2ab5a09738a7..5a50df5f1fa0 100644
+--- a/src/agents/pi-embedded-subscribe.tools.test.ts
++++ b/src/agents/pi-embedded-subscribe.tools.test.ts
+@@ -12,4 +12,18 @@ describe("extractToolErrorMessage", () => {
+     expect(extractToolErrorMessage({ details: { status: "failed" } })).toBe("failed");
+     expect(extractToolErrorMessage({ details: { status: "timeout" } })).toBe("timeout");
+   });
++
++  it("normalizes permission denied errors for file-mutation tools", () => {
++    expect(
++      extractToolErrorMessage(
++        {
++          details: {
++            status: "error",
++            error: "EACCES: permission denied, open '/tmp/LOCKED.md'",
++          },
++        },
++        "edit",
++      ),
++    ).toBe("blocked by filesystem protection policy (permission denied)");
++  });
+ });
+diff --git a/src/agents/pi-embedded-subscribe.tools.ts b/src/agents/pi-embedded-subscribe.tools.ts
+index 08a5e5f80c44..3be3e2efd4f5 100644
+--- a/src/agents/pi-embedded-subscribe.tools.ts
++++ b/src/agents/pi-embedded-subscribe.tools.ts
+@@ -30,6 +30,32 @@ function normalizeToolErrorText(text: string): string | undefined {
+     : firstLine;
+ }
+ 
++function normalizeToolErrorForTool(
++  toolName: string | undefined,
++  error: string | undefined,
++): string | undefined {
++  if (!error) {
++    return undefined;
++  }
++  const normalizedToolName = toolName?.trim().toLowerCase() ?? "";
++  const isFileMutatingTool =
++    normalizedToolName === "edit" ||
++    normalizedToolName === "write" ||
++    normalizedToolName === "apply_patch";
++  if (!isFileMutatingTool) {
++    return error;
++  }
++  const normalizedError = error.toLowerCase();
++  const permissionDenied =
++    normalizedError.includes("eacces") ||
++    normalizedError.includes("eperm") ||
++    normalizedError.includes("permission denied");
++  if (!permissionDenied) {
++    return error;
++  }
++  return "blocked by filesystem protection policy (permission denied)";
++}
++
+ function isErrorLikeStatus(status: string): boolean {
+   const normalized = status.trim().toLowerCase();
+   if (!normalized) {
+@@ -257,18 +283,18 @@ export function isToolResultError(result: unknown): boolean {
+   return normalized === "error" || normalized === "timeout";
+ }
+ 
+-export function extractToolErrorMessage(result: unknown): string | undefined {
++export function extractToolErrorMessage(result: unknown, toolName?: string): string | undefined {
+   if (!result || typeof result !== "object") {
+     return undefined;
+   }
+   const record = result as Record<string, unknown>;
+   const fromDetails = extractErrorField(record.details);
+   if (fromDetails) {
+-    return fromDetails;
++    return normalizeToolErrorForTool(toolName, fromDetails);
+   }
+   const fromRoot = extractErrorField(record);
+   if (fromRoot) {
+-    return fromRoot;
++    return normalizeToolErrorForTool(toolName, fromRoot);
+   }
+   const text = extractToolResultText(result);
+   if (!text) {
+@@ -278,12 +304,12 @@ export function extractToolErrorMessage(result: unknown): string | undefined {
+     const parsed = JSON.parse(text) as unknown;
+     const fromJson = extractErrorField(parsed);
+     if (fromJson) {
+-      return fromJson;
++      return normalizeToolErrorForTool(toolName, fromJson);
+     }
+   } catch {
+     // Fall through to first-line text fallback.
+   }
+-  return normalizeToolErrorText(text);
++  return normalizeToolErrorForTool(toolName, normalizeToolErrorText(text));
+ }
+ 
+ function resolveMessageToolTarget(args: Record<string, unknown>): string | undefined {
+diff --git a/src/agents/pi-tool-definition-adapter.test.ts b/src/agents/pi-tool-definition-adapter.test.ts
+index 6def07167cbb..4a05657b0946 100644
+--- a/src/agents/pi-tool-definition-adapter.test.ts
++++ b/src/agents/pi-tool-definition-adapter.test.ts
+@@ -56,6 +56,25 @@ describe("pi tool definition adapter", () => {
+     });
+   });
+ 
++  it("normalizes file permission denied errors for edit tool results", async () => {
++    const tool = {
++      name: "edit",
++      label: "Edit",
++      description: "throws permission denied",
++      parameters: Type.Object({}),
++      execute: async () => {
++        throw new Error("EACCES: permission denied, open '/tmp/LOCKED.md'");
++      },
++    } satisfies AgentTool;
++
++    const result = await executeTool(tool, "call2b");
++    expect(result.details).toMatchObject({
++      status: "error",
++      tool: "edit",
++      error: "blocked by filesystem protection policy (permission denied)",
++    });
++  });
++
+   it("coerces details-only tool results to include content", async () => {
+     const tool = {
+       name: "memory_query",
+diff --git a/src/agents/pi-tool-definition-adapter.ts b/src/agents/pi-tool-definition-adapter.ts
+index 1d4823845eba..2071808654fe 100644
+--- a/src/agents/pi-tool-definition-adapter.ts
++++ b/src/agents/pi-tool-definition-adapter.ts
+@@ -60,6 +60,26 @@ function describeToolExecutionError(err: unknown): {
+   return { message: String(err) };
+ }
+ 
++function normalizePermissionDeniedToolError(toolName: string, message: string): string {
++  const normalizedToolName = normalizeToolName(toolName);
++  const isFileMutatingTool =
++    normalizedToolName === "edit" ||
++    normalizedToolName === "write" ||
++    normalizedToolName === "apply_patch";
++  if (!isFileMutatingTool) {
++    return message;
++  }
++  const normalizedMessage = message.toLowerCase();
++  const isPermissionDenied =
++    normalizedMessage.includes("eacces") ||
++    normalizedMessage.includes("eperm") ||
++    normalizedMessage.includes("permission denied");
++  if (!isPermissionDenied) {
++    return message;
++  }
++  return "blocked by filesystem protection policy (permission denied)";
++}
++
+ function stringifyToolPayload(payload: unknown): string {
+   if (typeof payload === "string") {
+     return payload;
+@@ -177,6 +197,10 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
+             throw err;
+           }
+           const described = describeToolExecutionError(err);
++          const userFacingError = normalizePermissionDeniedToolError(
++            normalizedName,
++            described.message,
++          );
+           if (described.stack && described.stack !== described.message) {
+             logDebug(`tools: ${normalizedName} failed stack:\n${described.stack}`);
+           }
+@@ -185,7 +209,7 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
+           return jsonResult({
+             status: "error",
+             tool: normalizedName,
+-            error: described.message,
++            error: userFacingError,
+           });
+         }
+       },
+diff --git a/src/agents/pi-tools.before-tool-call.approvals.test.ts b/src/agents/pi-tools.before-tool-call.approvals.test.ts
+new file mode 100644
+index 000000000000..661318833ca6
+--- /dev/null
++++ b/src/agents/pi-tools.before-tool-call.approvals.test.ts
+@@ -0,0 +1,170 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
++import { requestExecApprovalDecision } from "./bash-tools.exec-approval-request.js";
++import {
++  __testing,
++  wrapToolWithBeforeToolCallHook,
++  type HookContext,
++} from "./pi-tools.before-tool-call.js";
++
++vi.mock("../plugins/hook-runner-global.js");
++vi.mock("./bash-tools.exec-approval-request.js", () => ({
++  requestExecApprovalDecision: vi.fn(),
++}));
++
++const mockGetGlobalHookRunner = vi.mocked(getGlobalHookRunner);
++const mockRequestExecApprovalDecision = vi.mocked(requestExecApprovalDecision);
++
++describe("before_tool_call approvals.tools", () => {
++  beforeEach(() => {
++    __testing.clearToolApprovalAllowAlwaysCache();
++    mockRequestExecApprovalDecision.mockReset();
++    mockGetGlobalHookRunner.mockReturnValue({
++      hasHooks: vi.fn(() => false),
++      runBeforeToolCall: vi.fn(),
++    } as unknown as ReturnType<typeof getGlobalHookRunner>);
++  });
++
++  function wrapTool(
++    name: string,
++    execute = vi.fn().mockResolvedValue({ ok: true }),
++    ctx?: HookContext,
++  ) {
++    return {
++      wrapped: wrapToolWithBeforeToolCallHook(
++        { name, execute } as unknown as Parameters<typeof wrapToolWithBeforeToolCallHook>[0],
++        ctx,
++      ),
++      execute,
++    };
++  }
++
++  it("requests approval for apply_patch and allows on allow-once", async () => {
++    mockRequestExecApprovalDecision.mockResolvedValue("allow-once");
++    const { wrapped, execute } = wrapTool("apply_patch", undefined, {
++      agentId: "main",
++      sessionKey: "agent:main:telegram:direct:123",
++      approvals: {
++        tools: { enabled: true },
++        turnSourceChannel: "telegram",
++        turnSourceTo: "123",
++      },
++    });
++
++    await wrapped.execute(
++      "tool-1",
++      { input: "*** Begin Patch\n*** End Patch\n" },
++      undefined,
++      undefined,
++    );
++
++    expect(mockRequestExecApprovalDecision).toHaveBeenCalledTimes(1);
++    expect(mockRequestExecApprovalDecision).toHaveBeenCalledWith(
++      expect.objectContaining({
++        command: "tool:apply_patch",
++        host: "gateway",
++        security: "full",
++        ask: "always",
++        turnSourceChannel: "telegram",
++        turnSourceTo: "123",
++      }),
++    );
++    expect(execute).toHaveBeenCalledTimes(1);
++  });
++
++  it("blocks on deny decision", async () => {
++    mockRequestExecApprovalDecision.mockResolvedValue("deny");
++    const { wrapped, execute } = wrapTool("apply_patch", undefined, {
++      approvals: {
++        tools: { enabled: true },
++      },
++    });
++
++    await expect(
++      wrapped.execute(
++        "tool-2",
++        { input: "*** Begin Patch\n*** End Patch\n" },
++        undefined,
++        undefined,
++      ),
++    ).rejects.toThrow("Tool call denied by operator");
++    expect(execute).not.toHaveBeenCalled();
++  });
++
++  it("caches allow-always by tool action scope", async () => {
++    mockRequestExecApprovalDecision.mockResolvedValue("allow-always");
++    const { wrapped } = wrapTool("apply_patch", undefined, {
++      agentId: "main",
++      sessionKey: "agent:main:telegram:direct:123",
++      approvals: {
++        tools: { enabled: true, allowAlwaysTtlMs: 60_000 },
++      },
++    });
++
++    await wrapped.execute(
++      "tool-3",
++      { input: "*** Begin Patch\n*** End Patch\n" },
++      undefined,
++      undefined,
++    );
++    await wrapped.execute(
++      "tool-4",
++      { input: "*** Begin Patch\n*** End Patch\n" },
++      undefined,
++      undefined,
++    );
++
++    expect(mockRequestExecApprovalDecision).toHaveBeenCalledTimes(1);
++  });
++
++  it("includes exec command preview and reason in approval summary", async () => {
++    mockRequestExecApprovalDecision.mockResolvedValue("allow-once");
++    const { wrapped, execute } = wrapTool("exec", undefined, {
++      approvals: {
++        tools: { enabled: true, tools: ["exec"] },
++      },
++    });
++
++    await wrapped.execute(
++      "tool-5",
++      {
++        cmd: "git status --short",
++        justification: "Check current repo changes before applying a patch",
++        workdir: "/home/sumix/.openclaw/workspace",
++      },
++      undefined,
++      undefined,
++    );
++
++    expect(mockRequestExecApprovalDecision).toHaveBeenCalledTimes(1);
++    const request = mockRequestExecApprovalDecision.mock.calls[0]?.[0];
++    expect(request).toEqual(
++      expect.objectContaining({
++        command: expect.stringContaining("tool:exec"),
++        cwd: "/home/sumix/.openclaw/workspace",
++      }),
++    );
++    expect(request?.command).toContain("cmd:git status --short");
++    expect(request?.command).toContain("why:Check current repo changes before applying a patch");
++    expect(request?.command).not.toContain("cwd:");
++    expect(execute).toHaveBeenCalledTimes(1);
++  });
++
++  it("fails open when configured and approval request errors", async () => {
++    mockRequestExecApprovalDecision.mockRejectedValue(new Error("gateway unavailable"));
++    const { wrapped, execute } = wrapTool("apply_patch", undefined, {
++      approvals: {
++        tools: { enabled: true, failClosed: false },
++      },
++    });
++
++    await wrapped.execute(
++      "tool-5",
++      { input: "*** Begin Patch\n*** End Patch\n" },
++      undefined,
++      undefined,
++    );
++
++    expect(execute).toHaveBeenCalledTimes(1);
++  });
++});
+diff --git a/src/agents/pi-tools.before-tool-call.ts b/src/agents/pi-tools.before-tool-call.ts
+index c1435c92de8e..f85e1c64a538 100644
+--- a/src/agents/pi-tools.before-tool-call.ts
++++ b/src/agents/pi-tools.before-tool-call.ts
+@@ -1,8 +1,14 @@
++import crypto from "node:crypto";
++import type { ToolApprovalConfig } from "../config/types.approvals.js";
+ import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
+ import type { SessionState } from "../logging/diagnostic-session-state.js";
+ import { createSubsystemLogger } from "../logging/subsystem.js";
+ import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
++import { compileSafeRegex } from "../security/safe-regex.js";
+ import { isPlainObject } from "../utils.js";
++import { normalizeMessageChannel } from "../utils/message-channel.js";
++import { requestExecApprovalDecision } from "./bash-tools.exec-approval-request.js";
++import { buildToolActionFingerprint, isMutatingToolCall } from "./tool-mutation.js";
+ import { normalizeToolName } from "./tool-policy.js";
+ import type { AnyAgentTool } from "./tools/common.js";
+ 
+@@ -13,6 +19,14 @@ export type HookContext = {
+   sessionId?: string;
+   runId?: string;
+   loopDetection?: ToolLoopDetectionConfig;
++  approvals?: {
++    tools?: ToolApprovalConfig;
++    turnSourceChannel?: string;
++    turnSourceTo?: string;
++    turnSourceAccountId?: string;
++    turnSourceThreadId?: string | number;
++    cwd?: string;
++  };
+ };
+ 
+ type HookOutcome = { blocked: true; reason: string } | { blocked: false; params: unknown };
+@@ -23,6 +37,269 @@ const adjustedParamsByToolCallId = new Map<string, unknown>();
+ const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
+ const LOOP_WARNING_BUCKET_SIZE = 10;
+ const MAX_LOOP_WARNING_KEYS = 256;
++const DEFAULT_TOOL_APPROVAL_TIMEOUT_MS = 120_000;
++const DEFAULT_TOOL_APPROVAL_ALLOW_ALWAYS_TTL_MS = 21_600_000;
++const MAX_TOOL_APPROVAL_CACHE = 2_048;
++const DEFAULT_SELECTED_TOOL_APPROVALS = new Set(["apply_patch"]);
++const toolApprovalAllowAlwaysCache = new Map<string, number>();
++const TOOL_APPROVAL_COMMAND_PREVIEW_MAX = 140;
++const TOOL_APPROVAL_CONTEXT_PREVIEW_MAX = 80;
++const TOOL_APPROVAL_COMMAND_FIELDS = [
++  "cmd",
++  "command",
++  "shellCommand",
++  "rawCommand",
++  "invokeCommand",
++  "ptyCommand",
++];
++const TOOL_APPROVAL_REASON_FIELDS = ["justification", "reason", "purpose", "description"];
++
++function normalizeApprovalList(values?: string[]): string[] {
++  if (!Array.isArray(values)) {
++    return [];
++  }
++  return values
++    .map((value) => normalizeToolName(value || ""))
++    .filter((value): value is string => value.length > 0);
++}
++
++function matchesSessionFilter(sessionKey: string, patterns: string[]): boolean {
++  return patterns.some((pattern) => {
++    if (sessionKey.includes(pattern)) {
++      return true;
++    }
++    const regex = compileSafeRegex(pattern);
++    return regex ? regex.test(sessionKey) : false;
++  });
++}
++
++function normalizePositiveInt(value: unknown, fallback: number, max: number): number {
++  if (typeof value !== "number" || !Number.isFinite(value)) {
++    return fallback;
++  }
++  const rounded = Math.floor(value);
++  if (rounded <= 0) {
++    return fallback;
++  }
++  return Math.min(rounded, max);
++}
++
++function sanitizeApprovalField(value: unknown): string | undefined {
++  if (typeof value !== "string") {
++    return undefined;
++  }
++  const trimmed = value.trim();
++  return trimmed ? trimmed : undefined;
++}
++
++function truncateApprovalPreview(value: string, max: number): string {
++  if (value.length <= max) {
++    return value;
++  }
++  return `${value.slice(0, Math.max(0, max - 3))}...`;
++}
++
++function summarizeToolCallForApproval(toolName: string, params: unknown): string {
++  const record = isPlainObject(params) ? params : {};
++  const action = sanitizeApprovalField(record.action)?.replace(/\s+/g, "_");
++  const commandField = TOOL_APPROVAL_COMMAND_FIELDS.find((field) =>
++    sanitizeApprovalField(record[field]),
++  );
++  const commandValue = commandField ? sanitizeApprovalField(record[commandField]) : undefined;
++  const reasonField = TOOL_APPROVAL_REASON_FIELDS.find((field) =>
++    sanitizeApprovalField(record[field]),
++  );
++  const reasonValue = reasonField ? sanitizeApprovalField(record[reasonField]) : undefined;
++  const targetKey = ["path", "filePath", "oldPath", "newPath", "target", "to", "id"].find((key) =>
++    sanitizeApprovalField(record[key]),
++  );
++  const targetValue = targetKey ? sanitizeApprovalField(record[targetKey]) : undefined;
++  const parts = [`tool:${toolName}`];
++  if (action) {
++    parts.push(`action:${action}`);
++  }
++  if (commandValue) {
++    const normalizedCommand = truncateApprovalPreview(
++      commandValue.replace(/\s+/g, " "),
++      TOOL_APPROVAL_COMMAND_PREVIEW_MAX,
++    );
++    parts.push(`cmd:${normalizedCommand}`);
++  }
++  if (reasonValue) {
++    const normalizedReason = truncateApprovalPreview(
++      reasonValue.replace(/\s+/g, " "),
++      TOOL_APPROVAL_COMMAND_PREVIEW_MAX,
++    );
++    parts.push(`why:${normalizedReason}`);
++  }
++  if (targetKey && targetValue) {
++    const shortValue = truncateApprovalPreview(targetValue, TOOL_APPROVAL_CONTEXT_PREVIEW_MAX);
++    parts.push(`${targetKey}:${shortValue}`);
++  }
++  return parts.join(" ");
++}
++
++function resolveToolApprovalScopeKey(args: {
++  agentId?: string;
++  sessionKey?: string;
++  toolName: string;
++  actionFingerprint?: string;
++}): string {
++  const parts = [
++    `agent=${args.agentId ?? ""}`,
++    `session=${args.sessionKey ?? ""}`,
++    `tool=${args.toolName}`,
++  ];
++  if (args.actionFingerprint) {
++    parts.push(`fingerprint=${args.actionFingerprint}`);
++  }
++  return parts.join("|");
++}
++
++function pruneToolApprovalCache(nowMs: number): void {
++  for (const [key, expiresAtMs] of toolApprovalAllowAlwaysCache) {
++    if (expiresAtMs <= nowMs) {
++      toolApprovalAllowAlwaysCache.delete(key);
++    }
++  }
++  while (toolApprovalAllowAlwaysCache.size > MAX_TOOL_APPROVAL_CACHE) {
++    const oldest = toolApprovalAllowAlwaysCache.keys().next().value;
++    if (!oldest) {
++      break;
++    }
++    toolApprovalAllowAlwaysCache.delete(oldest);
++  }
++}
++
++function resolveToolApprovalCwd(params: unknown, ctx?: HookContext): string {
++  const record = isPlainObject(params) ? params : {};
++  const fromWorkdir = sanitizeApprovalField(record.workdir);
++  if (fromWorkdir) {
++    return fromWorkdir;
++  }
++  const fromCwd = sanitizeApprovalField(record.cwd);
++  if (fromCwd) {
++    return fromCwd;
++  }
++  const fromContext = sanitizeApprovalField(ctx?.approvals?.cwd);
++  if (fromContext) {
++    return fromContext;
++  }
++  return process.cwd();
++}
++
++async function maybeEnforceToolApproval(args: {
++  toolName: string;
++  params: unknown;
++  ctx?: HookContext;
++}): Promise<HookOutcome | null> {
++  const cfg = args.ctx?.approvals?.tools;
++  if (!cfg?.enabled) {
++    return null;
++  }
++  if (cfg.agentFilter?.length) {
++    const agentId = args.ctx?.agentId;
++    if (!agentId || !cfg.agentFilter.includes(agentId)) {
++      return null;
++    }
++  }
++  if (cfg.sessionFilter?.length) {
++    const sessionKey = args.ctx?.sessionKey;
++    if (!sessionKey || !matchesSessionFilter(sessionKey, cfg.sessionFilter)) {
++      return null;
++    }
++  }
++  const mode = cfg.mode === "mutating" ? "mutating" : "selected";
++  const selectedTools = normalizeApprovalList(cfg.tools);
++  const selectedSet =
++    selectedTools.length > 0 ? new Set(selectedTools) : DEFAULT_SELECTED_TOOL_APPROVALS;
++  const requiresApproval =
++    mode === "mutating"
++      ? isMutatingToolCall(args.toolName, args.params)
++      : selectedSet.has(args.toolName);
++  if (!requiresApproval) {
++    return null;
++  }
++
++  const nowMs = Date.now();
++  const actionFingerprint = buildToolActionFingerprint(args.toolName, args.params);
++  const scopeKey = resolveToolApprovalScopeKey({
++    agentId: args.ctx?.agentId,
++    sessionKey: args.ctx?.sessionKey,
++    toolName: args.toolName,
++    actionFingerprint,
++  });
++  const cachedUntil = toolApprovalAllowAlwaysCache.get(scopeKey);
++  if (cachedUntil && cachedUntil > nowMs) {
++    return null;
++  }
++  if (cachedUntil && cachedUntil <= nowMs) {
++    toolApprovalAllowAlwaysCache.delete(scopeKey);
++  }
++
++  const timeoutMs = normalizePositiveInt(
++    cfg.timeoutMs,
++    DEFAULT_TOOL_APPROVAL_TIMEOUT_MS,
++    3_600_000,
++  );
++  const allowAlwaysTtlMs = normalizePositiveInt(
++    cfg.allowAlwaysTtlMs,
++    DEFAULT_TOOL_APPROVAL_ALLOW_ALWAYS_TTL_MS,
++    86_400_000,
++  );
++  const failClosed = cfg.failClosed !== false;
++  const security = cfg.security === "deny" || cfg.security === "allowlist" ? cfg.security : "full";
++  const ask = cfg.ask === "off" || cfg.ask === "on-miss" ? cfg.ask : "always";
++  const turnSourceChannel = normalizeMessageChannel(args.ctx?.approvals?.turnSourceChannel ?? "");
++
++  try {
++    const decision = await requestExecApprovalDecision({
++      id: `tool-${crypto.randomUUID()}`,
++      command: summarizeToolCallForApproval(args.toolName, args.params),
++      commandArgv: [args.toolName],
++      cwd: resolveToolApprovalCwd(args.params, args.ctx),
++      host: "gateway",
++      security,
++      ask,
++      agentId: args.ctx?.agentId,
++      resolvedPath: actionFingerprint,
++      sessionKey: args.ctx?.sessionKey,
++      turnSourceChannel: turnSourceChannel ?? undefined,
++      turnSourceTo: args.ctx?.approvals?.turnSourceTo,
++      turnSourceAccountId: args.ctx?.approvals?.turnSourceAccountId,
++      turnSourceThreadId: args.ctx?.approvals?.turnSourceThreadId,
++      timeoutMs,
++    });
++
++    if (decision === "allow-always") {
++      toolApprovalAllowAlwaysCache.set(scopeKey, nowMs + allowAlwaysTtlMs);
++      pruneToolApprovalCache(nowMs);
++      return null;
++    }
++    if (decision === "allow-once") {
++      return null;
++    }
++    if (decision === "deny") {
++      return {
++        blocked: true,
++        reason: `Tool call denied by operator: ${args.toolName}`,
++      };
++    }
++    return {
++      blocked: true,
++      reason: `Tool call denied (approval expired or unavailable): ${args.toolName}`,
++    };
++  } catch (err) {
++    if (!failClosed) {
++      log.warn(`tool approval request failed open: tool=${args.toolName} error=${String(err)}`);
++      return null;
++    }
++    return {
++      blocked: true,
++      reason: `Tool call denied (approval request failed): ${args.toolName}`,
++    };
++  }
++}
+ 
+ function buildAdjustedParamsKey(params: { runId?: string; toolCallId: string }): string {
+   if (params.runId && params.runId.trim()) {
+@@ -88,7 +365,7 @@ export async function runBeforeToolCallHook(args: {
+   ctx?: HookContext;
+ }): Promise<HookOutcome> {
+   const toolName = normalizeToolName(args.toolName || "tool");
+-  const params = args.params;
++  let params = args.params;
+ 
+   if (args.ctx?.sessionKey) {
+     const { getDiagnosticSessionState } = await import("../logging/diagnostic-session-state.js");
+@@ -143,46 +420,54 @@ export async function runBeforeToolCallHook(args: {
+   }
+ 
+   const hookRunner = getGlobalHookRunner();
+-  if (!hookRunner?.hasHooks("before_tool_call")) {
+-    return { blocked: false, params: args.params };
+-  }
+-
+-  try {
+-    const normalizedParams = isPlainObject(params) ? params : {};
+-    const toolContext = {
+-      toolName,
+-      ...(args.ctx?.agentId ? { agentId: args.ctx.agentId } : {}),
+-      ...(args.ctx?.sessionKey ? { sessionKey: args.ctx.sessionKey } : {}),
+-      ...(args.ctx?.sessionId ? { sessionId: args.ctx.sessionId } : {}),
+-      ...(args.ctx?.runId ? { runId: args.ctx.runId } : {}),
+-      ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
+-    };
+-    const hookResult = await hookRunner.runBeforeToolCall(
+-      {
++  if (hookRunner?.hasHooks("before_tool_call")) {
++    try {
++      const normalizedParams = isPlainObject(params) ? params : {};
++      const toolContext = {
+         toolName,
+-        params: normalizedParams,
++        ...(args.ctx?.agentId ? { agentId: args.ctx.agentId } : {}),
++        ...(args.ctx?.sessionKey ? { sessionKey: args.ctx.sessionKey } : {}),
++        ...(args.ctx?.sessionId ? { sessionId: args.ctx.sessionId } : {}),
+         ...(args.ctx?.runId ? { runId: args.ctx.runId } : {}),
+         ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
+-      },
+-      toolContext,
+-    );
+-
+-    if (hookResult?.block) {
+-      return {
+-        blocked: true,
+-        reason: hookResult.blockReason || "Tool call blocked by plugin hook",
+       };
+-    }
++      const hookResult = await hookRunner.runBeforeToolCall(
++        {
++          toolName,
++          params: normalizedParams,
++          ...(args.ctx?.runId ? { runId: args.ctx.runId } : {}),
++          ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
++        },
++        toolContext,
++      );
+ 
+-    if (hookResult?.params && isPlainObject(hookResult.params)) {
+-      if (isPlainObject(params)) {
+-        return { blocked: false, params: { ...params, ...hookResult.params } };
++      if (hookResult?.block) {
++        return {
++          blocked: true,
++          reason: hookResult.blockReason || "Tool call blocked by plugin hook",
++        };
+       }
+-      return { blocked: false, params: hookResult.params };
++
++      if (hookResult?.params && isPlainObject(hookResult.params)) {
++        if (isPlainObject(params)) {
++          params = { ...params, ...hookResult.params };
++        } else {
++          params = hookResult.params;
++        }
++      }
++    } catch (err) {
++      const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
++      log.warn(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(err)}`);
+     }
+-  } catch (err) {
+-    const toolCallId = args.toolCallId ? ` toolCallId=${args.toolCallId}` : "";
+-    log.warn(`before_tool_call hook failed: tool=${toolName}${toolCallId} error=${String(err)}`);
++  }
++
++  const toolApprovalOutcome = await maybeEnforceToolApproval({
++    toolName,
++    params,
++    ctx: args.ctx,
++  });
++  if (toolApprovalOutcome) {
++    return toolApprovalOutcome;
+   }
+ 
+   return { blocked: false, params };
+@@ -265,6 +550,10 @@ export const __testing = {
+   BEFORE_TOOL_CALL_WRAPPED,
+   buildAdjustedParamsKey,
+   adjustedParamsByToolCallId,
++  toolApprovalAllowAlwaysCache,
++  clearToolApprovalAllowAlwaysCache: () => {
++    toolApprovalAllowAlwaysCache.clear();
++  },
+   runBeforeToolCallHook,
+   isPlainObject,
+ };
+diff --git a/src/agents/pi-tools.ts b/src/agents/pi-tools.ts
+index 7d6fdf1c1409..601e0c744441 100644
+--- a/src/agents/pi-tools.ts
++++ b/src/agents/pi-tools.ts
+@@ -541,6 +541,14 @@ export function createOpenClawCodingTools(options?: {
+       sessionId: options?.sessionId,
+       runId: options?.runId,
+       loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
++      approvals: {
++        tools: options?.config?.approvals?.tools,
++        turnSourceChannel: options?.messageProvider,
++        turnSourceTo: options?.currentChannelId ?? options?.messageTo,
++        turnSourceAccountId: options?.agentAccountId,
++        turnSourceThreadId: options?.currentThreadTs ?? options?.messageThreadId,
++        cwd: options?.workspaceDir,
++      },
+     }),
+   );
+   const withAbort = options?.abortSignal
+diff --git a/src/auto-reply/reply/commands-approve.ts b/src/auto-reply/reply/commands-approve.ts
+index 42e5b30a3412..3bc6c0663303 100644
+--- a/src/auto-reply/reply/commands-approve.ts
++++ b/src/auto-reply/reply/commands-approve.ts
+@@ -1,5 +1,6 @@
+ import { callGateway } from "../../gateway/call.js";
+ import { logVerbose } from "../../globals.js";
++import type { ExecApprovalResolveAudit } from "../../infra/exec-approvals.js";
+ import {
+   GATEWAY_CLIENT_MODES,
+   GATEWAY_CLIENT_NAMES,
+@@ -8,6 +9,8 @@ import {
+ import type { CommandHandler } from "./commands-types.js";
+ 
+ const COMMAND = "/approve";
++const DASH_VARIANTS_REGEX = /[‐‑‒–—―−﹣－]/g;
++const INVISIBLE_CHARS_REGEX = /[\u200B-\u200D\uFEFF]/g;
+ 
+ const DECISION_ALIASES: Record<string, "allow-once" | "allow-always" | "deny"> = {
+   allow: "allow-once",
+@@ -26,6 +29,21 @@ type ParsedApproveCommand =
+   | { ok: true; id: string; decision: "allow-once" | "allow-always" | "deny" }
+   | { ok: false; error: string };
+ 
++type ExecApprovalResolveResponse = {
++  decision?: unknown;
++};
++
++function normalizeDecisionToken(token: string): string {
++  return token
++    .normalize("NFKC")
++    .replace(INVISIBLE_CHARS_REGEX, "")
++    .replace(/\u00ad/g, "")
++    .replace(DASH_VARIANTS_REGEX, "-")
++    .trim()
++    .toLowerCase()
++    .replace(/^[^a-z0-9]+|[^a-z0-9-]+$/g, "");
++}
++
+ function parseApproveCommand(raw: string): ParsedApproveCommand | null {
+   const trimmed = raw.trim();
+   if (!trimmed.toLowerCase().startsWith(COMMAND)) {
+@@ -40,8 +58,8 @@ function parseApproveCommand(raw: string): ParsedApproveCommand | null {
+     return { ok: false, error: "Usage: /approve <id> allow-once|allow-always|deny" };
+   }
+ 
+-  const first = tokens[0].toLowerCase();
+-  const second = tokens[1].toLowerCase();
++  const first = normalizeDecisionToken(tokens[0] ?? "");
++  const second = normalizeDecisionToken(tokens[1] ?? "");
+ 
+   if (DECISION_ALIASES[first]) {
+     return {
+@@ -66,6 +84,31 @@ function buildResolvedByLabel(params: Parameters<CommandHandler>[0]): string {
+   return `${channel}:${sender}`;
+ }
+ 
++function buildApprovalAudit(params: Parameters<CommandHandler>[0]): ExecApprovalResolveAudit {
++  return {
++    origin: params.command.approvalCommandOrigin === "button" ? "button" : "typed",
++    channel: params.command.channel || undefined,
++    surface: params.command.surface || undefined,
++    senderId: params.command.senderId || undefined,
++    commandSource: params.command.commandSource ?? "text",
++  };
++}
++
++function buildResolveFailureMessage(err: unknown): string {
++  const message = String(err);
++  if (/unknown approval id/i.test(message) || /approval expired or not found/i.test(message)) {
++    return "❌ Approval is no longer pending (already resolved, expired, or service restarted).";
++  }
++  return `❌ Failed to submit approval: ${message}`;
++}
++
++function normalizeDecision(value: unknown): "allow-once" | "allow-always" | "deny" | undefined {
++  if (value === "allow-once" || value === "allow-always" || value === "deny") {
++    return value;
++  }
++  return undefined;
++}
++
+ export const handleApproveCommand: CommandHandler = async (params, allowTextCommands) => {
+   if (!allowTextCommands) {
+     return null;
+@@ -101,10 +144,12 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
+   }
+ 
+   const resolvedBy = buildResolvedByLabel(params);
++  const audit = buildApprovalAudit(params);
++  let resolveResult: ExecApprovalResolveResponse | null = null;
+   try {
+-    await callGateway({
++    resolveResult = await callGateway<ExecApprovalResolveResponse>({
+       method: "exec.approval.resolve",
+-      params: { id: parsed.id, decision: parsed.decision },
++      params: { id: parsed.id, decision: parsed.decision, audit },
+       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
+       clientDisplayName: `Chat approval (${resolvedBy})`,
+       mode: GATEWAY_CLIENT_MODES.BACKEND,
+@@ -113,13 +158,14 @@ export const handleApproveCommand: CommandHandler = async (params, allowTextComm
+     return {
+       shouldContinue: false,
+       reply: {
+-        text: `❌ Failed to submit approval: ${String(err)}`,
++        text: buildResolveFailureMessage(err),
+       },
+     };
+   }
++  const finalDecision = normalizeDecision(resolveResult?.decision) ?? parsed.decision;
+ 
+   return {
+     shouldContinue: false,
+-    reply: { text: `✅ Exec approval ${parsed.decision} submitted for ${parsed.id}.` },
++    reply: { text: `✅ Exec approval ${finalDecision} submitted for ${parsed.id}.` },
+   };
+ };
+diff --git a/src/auto-reply/reply/commands-context.ts b/src/auto-reply/reply/commands-context.ts
+index 3d177c2b5f99..5891e877fc82 100644
+--- a/src/auto-reply/reply/commands-context.ts
++++ b/src/auto-reply/reply/commands-context.ts
+@@ -36,6 +36,8 @@ export function buildCommandContext(params: {
+     senderIsOwner: auth.senderIsOwner,
+     isAuthorizedSender: auth.isAuthorizedSender,
+     senderId: auth.senderId,
++    commandSource: ctx.CommandSource,
++    approvalCommandOrigin: ctx.ApprovalCommandOrigin,
+     abortKey,
+     rawBodyNormalized,
+     commandBodyNormalized,
+diff --git a/src/auto-reply/reply/commands-types.ts b/src/auto-reply/reply/commands-types.ts
+index 4662bf12a22b..3476fee07909 100644
+--- a/src/auto-reply/reply/commands-types.ts
++++ b/src/auto-reply/reply/commands-types.ts
+@@ -15,6 +15,8 @@ export type CommandContext = {
+   senderIsOwner: boolean;
+   isAuthorizedSender: boolean;
+   senderId?: string;
++  commandSource?: "text" | "native";
++  approvalCommandOrigin?: "typed" | "button";
+   abortKey?: string;
+   rawBodyNormalized: string;
+   commandBodyNormalized: string;
+diff --git a/src/auto-reply/reply/commands.test.ts b/src/auto-reply/reply/commands.test.ts
+index c007e331718e..5fb097c1f247 100644
+--- a/src/auto-reply/reply/commands.test.ts
++++ b/src/auto-reply/reply/commands.test.ts
+@@ -284,11 +284,71 @@ describe("/approve command", () => {
+     expect(callGatewayMock).toHaveBeenCalledWith(
+       expect.objectContaining({
+         method: "exec.approval.resolve",
+-        params: { id: "abc", decision: "allow-once" },
++        params: expect.objectContaining({
++          id: "abc",
++          decision: "allow-once",
++          audit: expect.objectContaining({ origin: "typed" }),
++        }),
++      }),
++    );
++  });
++
++  it("reports the persisted decision when approval was already resolved", async () => {
++    const cfg = {
++      commands: { text: true },
++      channels: { whatsapp: { allowFrom: ["*"] } },
++    } as OpenClawConfig;
++    const params = buildParams("/approve abc allow-once", cfg, { SenderId: "123" });
++
++    callGatewayMock.mockResolvedValue({
++      ok: true,
++      alreadyResolved: true,
++      decision: "deny",
++    });
++
++    const result = await handleCommands(params);
++    expect(result.shouldContinue).toBe(false);
++    expect(result.reply?.text).toContain("Exec approval deny submitted");
++  });
++
++  it("accepts mobile dash variants in decision token", async () => {
++    const cfg = {
++      commands: { text: true },
++      channels: { whatsapp: { allowFrom: ["*"] } },
++    } as OpenClawConfig;
++    const params = buildParams("/approve abc allow‑once", cfg, { SenderId: "123" });
++
++    callGatewayMock.mockResolvedValueOnce({ ok: true });
++
++    const result = await handleCommands(params);
++    expect(result.shouldContinue).toBe(false);
++    expect(result.reply?.text).toContain("Exec approval allow-once submitted");
++    expect(callGatewayMock).toHaveBeenCalledWith(
++      expect.objectContaining({
++        method: "exec.approval.resolve",
++        params: expect.objectContaining({
++          id: "abc",
++          decision: "allow-once",
++          audit: expect.objectContaining({ origin: "typed" }),
++        }),
+       }),
+     );
+   });
+ 
++  it("maps stale or unknown approval ids to a friendly no-longer-pending message", async () => {
++    const cfg = {
++      commands: { text: true },
++      channels: { whatsapp: { allowFrom: ["*"] } },
++    } as OpenClawConfig;
++    const params = buildParams("/approve abc allow-once", cfg, { SenderId: "123" });
++
++    callGatewayMock.mockRejectedValueOnce(new Error("unknown approval id"));
++
++    const result = await handleCommands(params);
++    expect(result.shouldContinue).toBe(false);
++    expect(result.reply?.text).toContain("Approval is no longer pending");
++  });
++
+   it("rejects gateway clients without approvals scope", async () => {
+     const cfg = {
+       commands: { text: true },
+@@ -326,11 +386,49 @@ describe("/approve command", () => {
+       expect(callGatewayMock).toHaveBeenLastCalledWith(
+         expect.objectContaining({
+           method: "exec.approval.resolve",
+-          params: { id: "abc", decision: "allow-once" },
++          params: expect.objectContaining({
++            id: "abc",
++            decision: "allow-once",
++            audit: expect.objectContaining({ origin: "typed" }),
++          }),
+         }),
+       );
+     }
+   });
++
++  it("tags callback-origin approvals as button in resolve audit metadata", async () => {
++    const cfg = {
++      commands: { text: true },
++      channels: { telegram: { allowFrom: ["*"] } },
++    } as OpenClawConfig;
++    const params = buildParams("/approve abc allow-once", cfg, {
++      Provider: "telegram",
++      Surface: "telegram",
++      SenderId: "123",
++      ApprovalCommandOrigin: "button",
++      CommandSource: "text",
++    });
++
++    callGatewayMock.mockResolvedValue({ ok: true });
++
++    const result = await handleCommands(params);
++    expect(result.shouldContinue).toBe(false);
++    expect(callGatewayMock).toHaveBeenCalledWith(
++      expect.objectContaining({
++        method: "exec.approval.resolve",
++        params: expect.objectContaining({
++          id: "abc",
++          decision: "allow-once",
++          audit: expect.objectContaining({
++            origin: "button",
++            channel: "telegram",
++            surface: "telegram",
++            senderId: "123",
++          }),
++        }),
++      }),
++    );
++  });
+ });
+ 
+ describe("/compact command", () => {
+diff --git a/src/auto-reply/templating.ts b/src/auto-reply/templating.ts
+index f0934279c809..243fe92fb3f4 100644
+--- a/src/auto-reply/templating.ts
++++ b/src/auto-reply/templating.ts
+@@ -132,6 +132,8 @@ export type MsgContext = {
+   WasMentioned?: boolean;
+   CommandAuthorized?: boolean;
+   CommandSource?: "text" | "native";
++  /** Structured origin for interactive command flows (for audit metadata). */
++  ApprovalCommandOrigin?: "typed" | "button";
+   CommandTargetSessionKey?: string;
+   /** Gateway client scopes when the message originates from the gateway. */
+   GatewayClientScopes?: string[];
+diff --git a/src/config/schema.help.quality.test.ts b/src/config/schema.help.quality.test.ts
+index a05d1f6417f1..07d7c517c0c4 100644
+--- a/src/config/schema.help.quality.test.ts
++++ b/src/config/schema.help.quality.test.ts
+@@ -175,6 +175,17 @@ const TARGET_KEYS = [
+   "approvals.exec.targets[].to",
+   "approvals.exec.targets[].accountId",
+   "approvals.exec.targets[].threadId",
++  "approvals.tools",
++  "approvals.tools.enabled",
++  "approvals.tools.mode",
++  "approvals.tools.tools",
++  "approvals.tools.agentFilter",
++  "approvals.tools.sessionFilter",
++  "approvals.tools.security",
++  "approvals.tools.ask",
++  "approvals.tools.timeoutMs",
++  "approvals.tools.failClosed",
++  "approvals.tools.allowAlwaysTtlMs",
+   "nodeHost",
+   "nodeHost.browserProxy",
+   "nodeHost.browserProxy.enabled",
+@@ -385,6 +396,9 @@ const ENUM_EXPECTATIONS: Record<string, string[]> = {
+   "models.providers.*.auth": ['"api-key"', '"token"', '"oauth"', '"aws-sdk"'],
+   "gateway.reload.mode": ['"off"', '"restart"', '"hot"', '"hybrid"'],
+   "approvals.exec.mode": ['"session"', '"targets"', '"both"'],
++  "approvals.tools.mode": ['"selected"', '"mutating"'],
++  "approvals.tools.security": ['"deny"', '"allowlist"', '"full"'],
++  "approvals.tools.ask": ['"off"', '"on-miss"', '"always"'],
+   "bindings[].match.peer.kind": ['"direct"', '"group"', '"channel"', '"dm"'],
+   "broadcast.strategy": ['"parallel"', '"sequential"'],
+   "hooks.mappings[].action": ['"wake"', '"agent"'],
+@@ -711,6 +725,14 @@ describe("config help copy quality", () => {
+     const targetTo = FIELD_HELP["approvals.exec.targets[].to"];
+     expect(/channel ID|user ID|thread root/i.test(targetTo)).toBe(true);
+     expect(/differs|per provider/i.test(targetTo)).toBe(true);
++
++    const toolMode = FIELD_HELP["approvals.tools.mode"];
++    expect(toolMode.includes('"selected"')).toBe(true);
++    expect(toolMode.includes('"mutating"')).toBe(true);
++
++    const toolList = FIELD_HELP["approvals.tools.tools"];
++    expect(toolList.includes("apply_patch")).toBe(true);
++    expect(toolList.includes("write")).toBe(true);
+   });
+ 
+   it("documents broadcast and audio command examples", () => {
+diff --git a/src/config/schema.help.ts b/src/config/schema.help.ts
+index a6a49fae033a..9c96c1b03bde 100644
+--- a/src/config/schema.help.ts
++++ b/src/config/schema.help.ts
+@@ -576,6 +576,28 @@ export const FIELD_HELP: Record<string, string> = {
+     "Optional account selector for multi-account channel setups when approvals must route through a specific account context. Use this only when the target channel has multiple configured identities.",
+   "approvals.exec.targets[].threadId":
+     "Optional thread/topic target for channels that support threaded delivery of forwarded approvals. Use this to keep approval traffic contained in operational threads instead of main channels.",
++  "approvals.tools":
++    "Gates selected agent tool calls behind the same approval channel used for exec approvals. Use this to require operator confirmation before high-impact coding actions (for example apply_patch).",
++  "approvals.tools.enabled":
++    "Enables tool-call approval gating (default: false). Keep disabled unless your workflow requires explicit human approval before selected tool executions.",
++  "approvals.tools.mode":
++    'Tool matching mode: "selected" applies only to approvals.tools.tools, while "mutating" applies to any mutating tool action detected by policy. Use "selected" as the default unless you intentionally want broad mutating-action approvals.',
++  "approvals.tools.tools":
++    'Tool names requiring approval when mode="selected" (default: ["apply_patch"]). Use normalized tool ids such as apply_patch, write, edit, message, or nodes.',
++  "approvals.tools.agentFilter":
++    'Optional allowlist of agent IDs subject to tool approvals, for example `["main", "ops-agent"]`. Use this to scope approvals to critical agents; omit to apply tool approvals to all agents.',
++  "approvals.tools.sessionFilter":
++    'Optional session-key filters matched as substring or regex-style patterns, for example `["telegram:", "^agent:main:"]`. Use narrow filters to avoid gating unrelated sessions.',
++  "approvals.tools.security":
++    'Security label shown in approval prompts ("deny", "allowlist", or "full"; default: "full"). This is a policy hint for operators and audit trails.',
++  "approvals.tools.ask":
++    'Ask label shown in approval prompts ("off", "on-miss", or "always"; default: "always"). Keep "always" for strict operator-in-the-loop workflows.',
++  "approvals.tools.timeoutMs":
++    "Timeout in milliseconds for each tool approval request (default: 120000). Expired requests deny by default when failClosed is true.",
++  "approvals.tools.failClosed":
++    "If true (default), tool approval transport failures deny the tool call. Set false only if temporary approval-channel outages should not block operations.",
++  "approvals.tools.allowAlwaysTtlMs":
++    "TTL in milliseconds for allow-always grants cached by session and tool-action fingerprint (default: 21600000 / 6h). Lower this in high-control environments.",
+   "tools.fs.workspaceOnly":
+     "Restrict filesystem tools (read/write/edit/apply_patch) to the workspace directory (default: false).",
+   "tools.sessions.visibility":
+diff --git a/src/config/schema.labels.ts b/src/config/schema.labels.ts
+index 35ad9db80f9e..179d9f1c2b5f 100644
+--- a/src/config/schema.labels.ts
++++ b/src/config/schema.labels.ts
+@@ -197,6 +197,17 @@ export const FIELD_LABELS: Record<string, string> = {
+   "approvals.exec.targets[].to": "Approval Target Destination",
+   "approvals.exec.targets[].accountId": "Approval Target Account ID",
+   "approvals.exec.targets[].threadId": "Approval Target Thread ID",
++  "approvals.tools": "Tool Execution Approvals",
++  "approvals.tools.enabled": "Enable Tool Approvals",
++  "approvals.tools.mode": "Tool Approval Mode",
++  "approvals.tools.tools": "Tool Approval List",
++  "approvals.tools.agentFilter": "Tool Approval Agent Filter",
++  "approvals.tools.sessionFilter": "Tool Approval Session Filter",
++  "approvals.tools.security": "Tool Approval Security Label",
++  "approvals.tools.ask": "Tool Approval Ask Label",
++  "approvals.tools.timeoutMs": "Tool Approval Timeout (ms)",
++  "approvals.tools.failClosed": "Tool Approval Fail-Closed",
++  "approvals.tools.allowAlwaysTtlMs": "Tool Approval Allow-Always TTL (ms)",
+   "tools.message.allowCrossContextSend": "Allow Cross-Context Messaging",
+   "tools.message.crossContext.allowWithinProvider": "Allow Cross-Context (Same Provider)",
+   "tools.message.crossContext.allowAcrossProviders": "Allow Cross-Context (Across Providers)",
+diff --git a/src/config/types.approvals.ts b/src/config/types.approvals.ts
+index d86d05b8e79e..2824488e7417 100644
+--- a/src/config/types.approvals.ts
++++ b/src/config/types.approvals.ts
+@@ -24,6 +24,32 @@ export type ExecApprovalForwardingConfig = {
+   targets?: ExecApprovalForwardTarget[];
+ };
+ 
++export type ToolApprovalMode = "selected" | "mutating";
++
++export type ToolApprovalConfig = {
++  /** Enable tool-call approvals before execution. Default: false. */
++  enabled?: boolean;
++  /** Matching mode: explicit tool list or any mutating tool call. Default: selected. */
++  mode?: ToolApprovalMode;
++  /** Tool names to require approval for when mode=selected. Default: ["apply_patch"]. */
++  tools?: string[];
++  /** Only require approvals for these agent IDs. Omit = all agents. */
++  agentFilter?: string[];
++  /** Only require approvals matching these session key patterns (substring or regex). */
++  sessionFilter?: string[];
++  /** Approval security label shown to operators. Default: full. */
++  security?: "deny" | "allowlist" | "full";
++  /** Ask policy label shown to operators. Default: always. */
++  ask?: "off" | "on-miss" | "always";
++  /** Approval request timeout in milliseconds. Default: 120000. */
++  timeoutMs?: number;
++  /** If true, approval pipeline failures deny the tool call. Default: true. */
++  failClosed?: boolean;
++  /** Cache duration for allow-always decisions (ms). Default: 21600000 (6h). */
++  allowAlwaysTtlMs?: number;
++};
++
+ export type ApprovalsConfig = {
+   exec?: ExecApprovalForwardingConfig;
++  tools?: ToolApprovalConfig;
+ };
+diff --git a/src/config/zod-schema.approvals.ts b/src/config/zod-schema.approvals.ts
+index e5276d19a0cf..4879ba118005 100644
+--- a/src/config/zod-schema.approvals.ts
++++ b/src/config/zod-schema.approvals.ts
+@@ -20,9 +20,26 @@ const ExecApprovalForwardingSchema = z
+   .strict()
+   .optional();
+ 
++const ToolApprovalSchema = z
++  .object({
++    enabled: z.boolean().optional(),
++    mode: z.union([z.literal("selected"), z.literal("mutating")]).optional(),
++    tools: z.array(z.string()).optional(),
++    agentFilter: z.array(z.string()).optional(),
++    sessionFilter: z.array(z.string()).optional(),
++    security: z.union([z.literal("deny"), z.literal("allowlist"), z.literal("full")]).optional(),
++    ask: z.union([z.literal("off"), z.literal("on-miss"), z.literal("always")]).optional(),
++    timeoutMs: z.number().int().positive().optional(),
++    failClosed: z.boolean().optional(),
++    allowAlwaysTtlMs: z.number().int().positive().optional(),
++  })
++  .strict()
++  .optional();
++
+ export const ApprovalsSchema = z
+   .object({
+     exec: ExecApprovalForwardingSchema,
++    tools: ToolApprovalSchema,
+   })
+   .strict()
+   .optional();
+diff --git a/src/gateway/protocol/schema/exec-approvals.ts b/src/gateway/protocol/schema/exec-approvals.ts
+index d7773c6b418d..d38ead530ca2 100644
+--- a/src/gateway/protocol/schema/exec-approvals.ts
++++ b/src/gateway/protocol/schema/exec-approvals.ts
+@@ -125,6 +125,18 @@ export const ExecApprovalResolveParamsSchema = Type.Object(
+   {
+     id: NonEmptyString,
+     decision: NonEmptyString,
++    audit: Type.Optional(
++      Type.Object(
++        {
++          origin: Type.Union([Type.Literal("typed"), Type.Literal("button")]),
++          channel: Type.Optional(Type.String()),
++          surface: Type.Optional(Type.String()),
++          senderId: Type.Optional(Type.String()),
++          commandSource: Type.Optional(Type.Union([Type.Literal("text"), Type.Literal("native")])),
++        },
++        { additionalProperties: false },
++      ),
++    ),
+   },
+   { additionalProperties: false },
+ );
+diff --git a/src/gateway/server-methods/exec-approval.ts b/src/gateway/server-methods/exec-approval.ts
+index 8d040e25e370..2093ce03d258 100644
+--- a/src/gateway/server-methods/exec-approval.ts
++++ b/src/gateway/server-methods/exec-approval.ts
+@@ -1,6 +1,7 @@
+ import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
+ import {
+   DEFAULT_EXEC_APPROVAL_TIMEOUT_MS,
++  type ExecApprovalResolveAudit,
+   type ExecApprovalDecision,
+ } from "../../infra/exec-approvals.js";
+ import { buildSystemRunApprovalBinding } from "../../infra/system-run-approval-binding.js";
+@@ -269,22 +270,43 @@ export function createExecApprovalHandlers(
+         );
+         return;
+       }
+-      const p = params as { id: string; decision: string };
++      const p = params as { id: string; decision: string; audit?: ExecApprovalResolveAudit };
+       const decision = p.decision as ExecApprovalDecision;
+       if (decision !== "allow-once" && decision !== "allow-always" && decision !== "deny") {
+         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "invalid decision"));
+         return;
+       }
+       const snapshot = manager.getSnapshot(p.id);
++      if (snapshot?.resolvedAtMs !== undefined && snapshot.decision !== undefined) {
++        respond(true, { ok: true, alreadyResolved: true, decision: snapshot.decision }, undefined);
++        return;
++      }
+       const resolvedBy = client?.connect?.client?.displayName ?? client?.connect?.client?.id;
+       const ok = manager.resolve(p.id, decision, resolvedBy ?? null);
+       if (!ok) {
++        const latestSnapshot = manager.getSnapshot(p.id);
++        if (latestSnapshot?.resolvedAtMs !== undefined && latestSnapshot.decision !== undefined) {
++          respond(
++            true,
++            { ok: true, alreadyResolved: true, decision: latestSnapshot.decision },
++            undefined,
++          );
++          return;
++        }
+         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown approval id"));
+         return;
+       }
++      const ts = Date.now();
+       context.broadcast(
+         "exec.approval.resolved",
+-        { id: p.id, decision, resolvedBy, ts: Date.now(), request: snapshot?.request },
++        {
++          id: p.id,
++          decision,
++          resolvedBy,
++          ts,
++          request: snapshot?.request,
++          audit: p.audit,
++        },
+         { dropIfSlow: true },
+       );
+       void opts?.forwarder
+@@ -292,8 +314,9 @@ export function createExecApprovalHandlers(
+           id: p.id,
+           decision,
+           resolvedBy,
+-          ts: Date.now(),
++          ts,
+           request: snapshot?.request,
++          audit: p.audit,
+         })
+         .catch((err) => {
+           context.logGateway?.error?.(`exec approvals: forward resolve failed: ${String(err)}`);
+diff --git a/src/gateway/server-methods/server-methods.test.ts b/src/gateway/server-methods/server-methods.test.ts
+index 920d51b04009..9607b9b641ce 100644
+--- a/src/gateway/server-methods/server-methods.test.ts
++++ b/src/gateway/server-methods/server-methods.test.ts
+@@ -350,9 +350,20 @@ describe("exec approval handlers", () => {
+     id: string;
+     respond: ReturnType<typeof vi.fn>;
+     context: { broadcast: (event: string, payload: unknown) => void };
++    audit?: {
++      origin: "typed" | "button";
++      channel?: string;
++      surface?: string;
++      senderId?: string;
++      commandSource?: "text" | "native";
++    };
+   }) {
+     return params.handlers["exec.approval.resolve"]({
+-      params: { id: params.id, decision: "allow-once" } as ExecApprovalResolveArgs["params"],
++      params: {
++        id: params.id,
++        decision: "allow-once",
++        ...(params.audit ? { audit: params.audit } : {}),
++      } as ExecApprovalResolveArgs["params"],
+       respond: params.respond as unknown as ExecApprovalResolveArgs["respond"],
+       context: toExecApprovalResolveContext(params.context),
+       client: null,
+@@ -494,6 +505,89 @@ describe("exec approval handlers", () => {
+     expect(broadcasts.some((entry) => entry.event === "exec.approval.resolved")).toBe(true);
+   });
+ 
++  it("broadcasts resolve audit metadata", async () => {
++    const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
++
++    const requestPromise = requestExecApproval({
++      handlers,
++      respond,
++      context,
++      params: { twoPhase: true },
++    });
++
++    const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
++    const id = (requested?.payload as { id?: string })?.id ?? "";
++    expect(id).not.toBe("");
++
++    const resolveRespond = vi.fn();
++    await resolveExecApproval({
++      handlers,
++      id,
++      respond: resolveRespond,
++      context,
++      audit: {
++        origin: "button",
++        channel: "telegram",
++        surface: "telegram",
++        senderId: "123",
++        commandSource: "text",
++      },
++    });
++    await requestPromise;
++
++    const resolved = broadcasts.find((entry) => entry.event === "exec.approval.resolved");
++    expect(resolved).toBeTruthy();
++    expect((resolved?.payload as { audit?: unknown })?.audit).toEqual(
++      expect.objectContaining({
++        origin: "button",
++        channel: "telegram",
++        surface: "telegram",
++        senderId: "123",
++        commandSource: "text",
++      }),
++    );
++  });
++
++  it("treats duplicate resolve calls for already-resolved approvals as idempotent success", async () => {
++    const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
++
++    const requestPromise = requestExecApproval({
++      handlers,
++      respond,
++      context,
++      params: { twoPhase: true },
++    });
++
++    const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
++    const id = (requested?.payload as { id?: string })?.id ?? "";
++    expect(id).not.toBe("");
++
++    const firstResolveRespond = vi.fn();
++    await resolveExecApproval({
++      handlers,
++      id,
++      respond: firstResolveRespond,
++      context,
++    });
++    expect(firstResolveRespond).toHaveBeenCalledWith(true, { ok: true }, undefined);
++
++    const secondResolveRespond = vi.fn();
++    await resolveExecApproval({
++      handlers,
++      id,
++      respond: secondResolveRespond,
++      context,
++    });
++    expect(secondResolveRespond).toHaveBeenCalledWith(
++      true,
++      expect.objectContaining({ ok: true, alreadyResolved: true, decision: "allow-once" }),
++      undefined,
++    );
++
++    await requestPromise;
++    expect(broadcasts.filter((entry) => entry.event === "exec.approval.resolved")).toHaveLength(1);
++  });
++
+   it("stores versioned system.run binding and sorted env keys on approval request", async () => {
+     const { handlers, broadcasts, respond, context } = createExecApprovalFixture();
+     await requestExecApproval({
+diff --git a/src/gateway/server.impl.ts b/src/gateway/server.impl.ts
+index d714ea61eebe..3745399afd68 100644
+--- a/src/gateway/server.impl.ts
++++ b/src/gateway/server.impl.ts
+@@ -718,6 +718,13 @@ export async function startGatewayServer(
+ 
+   const execApprovalManager = new ExecApprovalManager();
+   const execApprovalForwarder = createExecApprovalForwarder();
++  if (!minimalTestGateway) {
++    try {
++      await execApprovalForwarder.recoverPendingFromState?.();
++    } catch (err) {
++      log.error(`exec approvals: forwarder recovery failed: ${String(err)}`);
++    }
++  }
+   const execApprovalHandlers = createExecApprovalHandlers(execApprovalManager, {
+     forwarder: execApprovalForwarder,
+   });
+diff --git a/src/infra/exec-approval-forwarder.test.ts b/src/infra/exec-approval-forwarder.test.ts
+index f87c307c211b..b0ba2127d9cd 100644
+--- a/src/infra/exec-approval-forwarder.test.ts
++++ b/src/infra/exec-approval-forwarder.test.ts
+@@ -40,21 +40,30 @@ const TARGETS_CFG = {
+ function createForwarder(params: {
+   cfg: OpenClawConfig;
+   deliver?: ReturnType<typeof vi.fn>;
++  editTelegramMessage?: ReturnType<typeof vi.fn>;
+   resolveSessionTarget?: () => { channel: string; to: string } | null;
++  stateFilePath?: string | null;
+ }) {
+   const deliver = params.deliver ?? vi.fn().mockResolvedValue([]);
++  const editTelegramMessage =
++    params.editTelegramMessage ??
++    vi.fn().mockResolvedValue({ ok: true, messageId: "m1", chatId: "123" });
+   const deps: NonNullable<Parameters<typeof createExecApprovalForwarder>[0]> = {
+     getConfig: () => params.cfg,
+     deliver: deliver as unknown as NonNullable<
+       NonNullable<Parameters<typeof createExecApprovalForwarder>[0]>["deliver"]
+     >,
++    editTelegramMessage: editTelegramMessage as unknown as NonNullable<
++      NonNullable<Parameters<typeof createExecApprovalForwarder>[0]>["editTelegramMessage"]
++    >,
+     nowMs: () => 1000,
+   };
+   if (params.resolveSessionTarget !== undefined) {
+     deps.resolveSessionTarget = params.resolveSessionTarget;
+   }
++  deps.stateFilePath = params.stateFilePath ?? null;
+   const forwarder = createExecApprovalForwarder(deps);
+-  return { deliver, forwarder };
++  return { deliver, editTelegramMessage, forwarder };
+ }
+ 
+ function makeSessionCfg(options: { discordExecApprovalsEnabled?: boolean } = {}): OpenClawConfig {
+@@ -94,6 +103,13 @@ async function expectDiscordSessionTargetRequest(params: {
+   expect(deliver).toHaveBeenCalledTimes(params.expectedDeliveryCount);
+ }
+ 
++function getFirstDeliveryPayload(deliver: ReturnType<typeof vi.fn>) {
++  const firstCall = deliver.mock.calls[0]?.[0] as
++    | { payloads?: Array<Record<string, unknown>> }
++    | undefined;
++  return firstCall?.payloads?.[0] ?? {};
++}
++
+ async function expectSessionFilterRequestResult(params: {
+   sessionFilter: string[];
+   sessionKey: string;
+@@ -156,13 +172,63 @@ describe("exec approval forwarder", () => {
+ 
+   it("forwards to explicit targets and expires", async () => {
+     vi.useFakeTimers();
+-    const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
++    const deliver = vi.fn().mockResolvedValue([
++      {
++        channel: "telegram",
++        messageId: "tg-req-1",
++        chatId: "123",
++      },
++    ]);
++    const { editTelegramMessage, forwarder } = createForwarder({ cfg: TARGETS_CFG, deliver });
+ 
+     await expect(forwarder.handleRequested(baseRequest)).resolves.toBe(true);
+     expect(deliver).toHaveBeenCalledTimes(1);
+ 
+     await vi.runAllTimersAsync();
+-    expect(deliver).toHaveBeenCalledTimes(2);
++    expect(deliver).toHaveBeenCalledTimes(1);
++    expect(editTelegramMessage).toHaveBeenCalledWith(
++      "123",
++      "tg-req-1",
++      expect.stringContaining("⏱️ Exec approval expired. ID: req-1"),
++      expect.objectContaining({ buttons: [] }),
++    );
++  });
++
++  it("adds Telegram approval buttons on request forwards", async () => {
++    vi.useFakeTimers();
++    const deliver = vi.fn().mockResolvedValue([]);
++    const cfg = {
++      approvals: {
++        exec: {
++          enabled: true,
++          mode: "targets",
++          targets: [{ channel: "telegram", to: "123" }],
++        },
++      },
++    } as OpenClawConfig;
++
++    const forwarder = createExecApprovalForwarder({
++      getConfig: () => cfg,
++      deliver,
++      nowMs: () => 1000,
++      resolveSessionTarget: () => null,
++      stateFilePath: null,
++    });
++
++    await forwarder.handleRequested(baseRequest);
++
++    const payload = getFirstDeliveryPayload(deliver);
++    const channelData = payload.channelData as
++      | {
++          telegram?: { buttons?: Array<Array<{ text?: string; callback_data?: string }>> };
++        }
++      | undefined;
++    const buttons = channelData?.telegram?.buttons ?? [];
++    expect(buttons).toHaveLength(2);
++    expect(buttons[0]?.[0]?.text).toBe("Allow once");
++    expect(buttons[0]?.[0]?.callback_data).toBe(`/approve ${baseRequest.id} allow-once`);
++    expect(buttons[1]?.[0]?.text).toBe("Deny");
++    expect(buttons[1]?.[0]?.callback_data).toBe(`/approve ${baseRequest.id} deny`);
+   });
+ 
+   it("formats single-line commands as inline code", async () => {
+@@ -174,6 +240,21 @@ describe("exec approval forwarder", () => {
+     expect(getFirstDeliveryText(deliver)).toContain("Command: `echo hello`");
+   });
+ 
++  it("dedupes duplicate requested events for the same approval id", async () => {
++    vi.useFakeTimers();
++    const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
++
++    await expect(forwarder.handleRequested(baseRequest)).resolves.toBe(true);
++    await expect(
++      forwarder.handleRequested({
++        ...baseRequest,
++        expiresAtMs: baseRequest.expiresAtMs + 60_000,
++      }),
++    ).resolves.toBe(true);
++
++    expect(deliver).toHaveBeenCalledTimes(1);
++  });
++
+   it("formats complex commands as fenced code blocks", async () => {
+     vi.useFakeTimers();
+     const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
+@@ -321,6 +402,218 @@ describe("exec approval forwarder", () => {
+     expect(deliver).toHaveBeenCalledTimes(1);
+   });
+ 
++  it("edits old telegram approval message on resolve and clears buttons", async () => {
++    vi.useFakeTimers();
++    const deliver = vi.fn().mockResolvedValue([
++      {
++        channel: "telegram",
++        messageId: "tg-req-2",
++        chatId: "123",
++      },
++    ]);
++    const { editTelegramMessage, forwarder } = createForwarder({ cfg: TARGETS_CFG, deliver });
++
++    await expect(forwarder.handleRequested(baseRequest)).resolves.toBe(true);
++    await Promise.resolve();
++    await forwarder.handleResolved({
++      id: baseRequest.id,
++      decision: "allow-once",
++      resolvedBy: "telegram:123",
++      ts: 2000,
++    });
++
++    expect(editTelegramMessage).toHaveBeenCalledWith(
++      "123",
++      "tg-req-2",
++      expect.stringContaining("✅ Exec approval allowed once."),
++      expect.objectContaining({ buttons: [] }),
++    );
++    expect(deliver).toHaveBeenCalledTimes(1);
++  });
++
++  it("finalizes late telegram request deliveries when resolve wins the race", async () => {
++    vi.useFakeTimers();
++    let resolveFirstDelivery!: (value: unknown[]) => void;
++    const firstDelivery = new Promise<unknown[]>((resolve) => {
++      resolveFirstDelivery = resolve;
++    });
++    const deliver = vi
++      .fn()
++      .mockImplementationOnce(async () => await firstDelivery)
++      .mockResolvedValueOnce([]);
++    const { editTelegramMessage, forwarder } = createForwarder({ cfg: TARGETS_CFG, deliver });
++
++    await expect(forwarder.handleRequested(baseRequest)).resolves.toBe(true);
++
++    await forwarder.handleResolved({
++      id: baseRequest.id,
++      decision: "allow-once",
++      resolvedBy: "telegram:123",
++      ts: 2000,
++    });
++
++    expect(editTelegramMessage).not.toHaveBeenCalled();
++
++    resolveFirstDelivery([
++      {
++        channel: "telegram",
++        messageId: "tg-race-1",
++        chatId: "123",
++      },
++    ]);
++    await vi.advanceTimersByTimeAsync(0);
++    await Promise.resolve();
++
++    expect(editTelegramMessage).toHaveBeenCalledWith(
++      "123",
++      "tg-race-1",
++      expect.stringContaining("✅ Exec approval allowed once."),
++      expect.objectContaining({ buttons: [] }),
++    );
++  });
++
++  it("sends resolved follow-up when telegram request edit fails", async () => {
++    vi.useFakeTimers();
++    const deliver = vi.fn().mockResolvedValue([
++      {
++        channel: "telegram",
++        messageId: "tg-req-3",
++        chatId: "123",
++      },
++    ]);
++    const editTelegramMessage = vi.fn().mockRejectedValue(new Error("edit failed"));
++    const { forwarder } = createForwarder({
++      cfg: TARGETS_CFG,
++      deliver,
++      editTelegramMessage,
++    });
++
++    await expect(forwarder.handleRequested(baseRequest)).resolves.toBe(true);
++    await Promise.resolve();
++    await forwarder.handleResolved({
++      id: baseRequest.id,
++      decision: "allow-once",
++      resolvedBy: "telegram:123",
++      ts: 2000,
++    });
++
++    expect(deliver).toHaveBeenCalledTimes(2);
++    const resolvedPayload = (deliver.mock.calls[1]?.[0] as { payloads?: Array<{ text?: string }> })
++      ?.payloads?.[0];
++    expect(resolvedPayload?.text).toContain("✅ Exec approval allowed once.");
++  });
++
++  it("recovers stale pending approvals after restart and clears old telegram buttons", async () => {
++    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-exec-approval-recover-"));
++    try {
++      const stateFilePath = path.join(tmpDir, "exec-approval-forwarder.json");
++      fs.writeFileSync(
++        stateFilePath,
++        JSON.stringify(
++          {
++            version: 1,
++            updatedAtMs: 1234,
++            pending: [
++              {
++                request: baseRequest,
++                targets: [{ channel: "telegram", to: "123", source: "target" }],
++                telegramMessages: [
++                  {
++                    targetKey: "telegram:123::",
++                    chatId: "123",
++                    messageId: "tg-stale-1",
++                  },
++                ],
++              },
++            ],
++          },
++          null,
++          2,
++        ),
++        "utf-8",
++      );
++
++      const editTelegramMessage = vi.fn().mockResolvedValue({
++        ok: true,
++        messageId: "tg-stale-1",
++        chatId: "123",
++      });
++      const deliver = vi.fn().mockResolvedValue([]);
++      const { forwarder } = createForwarder({
++        cfg: TARGETS_CFG,
++        deliver,
++        editTelegramMessage,
++        stateFilePath,
++      });
++
++      await forwarder.recoverPendingFromState?.();
++
++      expect(editTelegramMessage).toHaveBeenCalledWith(
++        "123",
++        "tg-stale-1",
++        expect.stringContaining("expired after gateway restart"),
++        expect.objectContaining({ buttons: [] }),
++      );
++      expect(deliver).not.toHaveBeenCalled();
++      const persisted = JSON.parse(fs.readFileSync(stateFilePath, "utf-8")) as {
++        pending?: unknown[];
++      };
++      expect(Array.isArray(persisted.pending) ? persisted.pending.length : -1).toBe(0);
++    } finally {
++      fs.rmSync(tmpDir, { recursive: true, force: true });
++    }
++  });
++
++  it("sends restart-expired follow-up when stale telegram message cannot be edited", async () => {
++    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-exec-approval-recover-"));
++    try {
++      const stateFilePath = path.join(tmpDir, "exec-approval-forwarder.json");
++      fs.writeFileSync(
++        stateFilePath,
++        JSON.stringify(
++          {
++            version: 1,
++            updatedAtMs: 1234,
++            pending: [
++              {
++                request: baseRequest,
++                targets: [{ channel: "telegram", to: "123", source: "target" }],
++                telegramMessages: [
++                  {
++                    targetKey: "telegram:123::",
++                    chatId: "123",
++                    messageId: "tg-stale-2",
++                  },
++                ],
++              },
++            ],
++          },
++          null,
++          2,
++        ),
++        "utf-8",
++      );
++
++      const editTelegramMessage = vi.fn().mockRejectedValue(new Error("edit failed"));
++      const deliver = vi.fn().mockResolvedValue([]);
++      const { forwarder } = createForwarder({
++        cfg: TARGETS_CFG,
++        deliver,
++        editTelegramMessage,
++        stateFilePath,
++      });
++
++      await forwarder.recoverPendingFromState?.();
++
++      expect(deliver).toHaveBeenCalledTimes(1);
++      const payload = (deliver.mock.calls[0]?.[0] as { payloads?: Array<{ text?: string }> })
++        ?.payloads?.[0];
++      expect(payload?.text).toContain("expired after gateway restart");
++    } finally {
++      fs.rmSync(tmpDir, { recursive: true, force: true });
++    }
++  });
++
+   it("uses a longer fence when command already contains triple backticks", async () => {
+     vi.useFakeTimers();
+     const { deliver, forwarder } = createForwarder({ cfg: TARGETS_CFG });
+diff --git a/src/infra/exec-approval-forwarder.ts b/src/infra/exec-approval-forwarder.ts
+index 296a6aa6e491..327819f54394 100644
+--- a/src/infra/exec-approval-forwarder.ts
++++ b/src/infra/exec-approval-forwarder.ts
+@@ -1,5 +1,8 @@
++import path from "node:path";
++import type { ReplyPayload } from "../auto-reply/types.js";
+ import type { OpenClawConfig } from "../config/config.js";
+ import { loadConfig } from "../config/config.js";
++import { resolveStateDir } from "../config/paths.js";
+ import { loadSessionStore, resolveStorePath } from "../config/sessions.js";
+ import type {
+   ExecApprovalForwardingConfig,
+@@ -8,6 +11,7 @@ import type {
+ import { createSubsystemLogger } from "../logging/subsystem.js";
+ import { normalizeAccountId, parseAgentSessionKey } from "../routing/session-key.js";
+ import { compileSafeRegex, testRegexWithBoundedInput } from "../security/safe-regex.js";
++import { editMessageTelegram } from "../telegram/send.js";
+ import {
+   isDeliverableMessageChannel,
+   normalizeMessageChannel,
+@@ -18,34 +22,69 @@ import type {
+   ExecApprovalRequest,
+   ExecApprovalResolved,
+ } from "./exec-approvals.js";
++import { createAsyncLock, readJsonFile, writeJsonAtomic } from "./json-files.js";
++import type { OutboundDeliveryResult } from "./outbound/deliver.js";
+ import { deliverOutboundPayloads } from "./outbound/deliver.js";
+ import { resolveSessionDeliveryTarget } from "./outbound/targets.js";
+ 
+ const log = createSubsystemLogger("gateway/exec-approvals");
++const FORWARDER_STATE_FILENAME = "exec-approval-forwarder.json";
++const FORWARDER_STATE_VERSION = 1 as const;
++const FINALIZED_STATE_RETENTION_MS = 15 * 60 * 1000;
++const MAX_FINALIZED_STATE_ENTRIES = 1024;
+ export type { ExecApprovalRequest, ExecApprovalResolved };
+ 
+ type ForwardTarget = ExecApprovalForwardTarget & { source: "session" | "target" };
+ 
++type PendingTelegramMessageRef = {
++  targetKey: string;
++  accountId?: string;
++  chatId: string;
++  messageId: string;
++};
++
+ type PendingApproval = {
+   request: ExecApprovalRequest;
+   targets: ForwardTarget[];
+   timeoutId: NodeJS.Timeout | null;
++  telegramMessages: PendingTelegramMessageRef[];
++};
++
++type FinalizedApproval = {
++  request: ExecApprovalRequest;
++  statusText: string;
++  finalizedAtMs: number;
++};
++
++type PersistedPendingApproval = {
++  request: ExecApprovalRequest;
++  targets: ForwardTarget[];
++  telegramMessages: PendingTelegramMessageRef[];
++};
++
++type PersistedForwarderState = {
++  version: typeof FORWARDER_STATE_VERSION;
++  updatedAtMs: number;
++  pending: PersistedPendingApproval[];
+ };
+ 
+ export type ExecApprovalForwarder = {
+   handleRequested: (request: ExecApprovalRequest) => Promise<boolean>;
+   handleResolved: (resolved: ExecApprovalResolved) => Promise<void>;
++  recoverPendingFromState?: () => Promise<void>;
+   stop: () => void;
+ };
+ 
+ export type ExecApprovalForwarderDeps = {
+   getConfig?: () => OpenClawConfig;
+   deliver?: typeof deliverOutboundPayloads;
++  editTelegramMessage?: typeof editMessageTelegram;
+   nowMs?: () => number;
+   resolveSessionTarget?: (params: {
+     cfg: OpenClawConfig;
+     request: ExecApprovalRequest;
+   }) => ExecApprovalForwardTarget | null;
++  stateFilePath?: string | null;
+ };
+ 
+ const DEFAULT_MODE = "session" as const;
+@@ -120,6 +159,153 @@ function resolveChannelAccountConfig<T>(
+   return fallbackKey ? accounts[fallbackKey] : undefined;
+ }
+ 
++function resolveForwarderStateFilePath(value?: string | null): string | null {
++  if (value === null) {
++    return null;
++  }
++  if (typeof value === "string") {
++    const trimmed = value.trim();
++    return trimmed.length > 0 ? trimmed : null;
++  }
++  return path.join(resolveStateDir(), FORWARDER_STATE_FILENAME);
++}
++
++function isFiniteNumber(value: unknown): value is number {
++  return typeof value === "number" && Number.isFinite(value);
++}
++
++function sanitizePersistedTarget(value: unknown): ForwardTarget | null {
++  if (!value || typeof value !== "object") {
++    return null;
++  }
++  const candidate = value as {
++    channel?: unknown;
++    to?: unknown;
++    accountId?: unknown;
++    threadId?: unknown;
++    source?: unknown;
++  };
++  const channel = typeof candidate.channel === "string" ? candidate.channel.trim() : "";
++  const to = typeof candidate.to === "string" ? candidate.to.trim() : "";
++  if (!channel || !to) {
++    return null;
++  }
++  const source = candidate.source === "session" ? "session" : "target";
++  const accountId = typeof candidate.accountId === "string" ? candidate.accountId : undefined;
++  const threadId =
++    typeof candidate.threadId === "string" || typeof candidate.threadId === "number"
++      ? candidate.threadId
++      : undefined;
++  return { channel, to, accountId, threadId, source };
++}
++
++function isForwardTarget(value: ForwardTarget | null): value is ForwardTarget {
++  return value !== null;
++}
++
++function sanitizePersistedTelegramRef(value: unknown): PendingTelegramMessageRef | null {
++  if (!value || typeof value !== "object") {
++    return null;
++  }
++  const candidate = value as {
++    targetKey?: unknown;
++    accountId?: unknown;
++    chatId?: unknown;
++    messageId?: unknown;
++  };
++  const targetKey = typeof candidate.targetKey === "string" ? candidate.targetKey.trim() : "";
++  const chatId = typeof candidate.chatId === "string" ? candidate.chatId.trim() : "";
++  const messageId = typeof candidate.messageId === "string" ? candidate.messageId.trim() : "";
++  if (!targetKey || !chatId || !messageId) {
++    return null;
++  }
++  const accountId = typeof candidate.accountId === "string" ? candidate.accountId : undefined;
++  return { targetKey, accountId, chatId, messageId };
++}
++
++function isPendingTelegramMessageRef(
++  value: PendingTelegramMessageRef | null,
++): value is PendingTelegramMessageRef {
++  return value !== null;
++}
++
++function sanitizePersistedRequest(value: unknown): ExecApprovalRequest | null {
++  if (!value || typeof value !== "object") {
++    return null;
++  }
++  const candidate = value as {
++    id?: unknown;
++    request?: unknown;
++    createdAtMs?: unknown;
++    expiresAtMs?: unknown;
++  };
++  const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
++  if (!id || !candidate.request || typeof candidate.request !== "object") {
++    return null;
++  }
++  const requestPayload = candidate.request as { command?: unknown };
++  const command = typeof requestPayload.command === "string" ? requestPayload.command.trim() : "";
++  if (!command) {
++    return null;
++  }
++  if (!isFiniteNumber(candidate.createdAtMs) || !isFiniteNumber(candidate.expiresAtMs)) {
++    return null;
++  }
++  return {
++    id,
++    request: candidate.request as ExecApprovalRequest["request"],
++    createdAtMs: candidate.createdAtMs,
++    expiresAtMs: candidate.expiresAtMs,
++  };
++}
++
++function readPersistedPendingApprovals(value: unknown): PersistedPendingApproval[] {
++  if (!value || typeof value !== "object") {
++    return [];
++  }
++  const parsed = value as {
++    version?: unknown;
++    pending?: unknown;
++  };
++  if (parsed.version !== FORWARDER_STATE_VERSION || !Array.isArray(parsed.pending)) {
++    return [];
++  }
++  const out: PersistedPendingApproval[] = [];
++  const seenIds = new Set<string>();
++  for (const item of parsed.pending) {
++    if (!item || typeof item !== "object") {
++      continue;
++    }
++    const candidate = item as {
++      request?: unknown;
++      targets?: unknown;
++      telegramMessages?: unknown;
++    };
++    const request = sanitizePersistedRequest(candidate.request);
++    if (!request || seenIds.has(request.id)) {
++      continue;
++    }
++    const targets = Array.isArray(candidate.targets)
++      ? candidate.targets.map((target) => sanitizePersistedTarget(target)).filter(isForwardTarget)
++      : [];
++    if (targets.length === 0) {
++      continue;
++    }
++    const telegramMessages = Array.isArray(candidate.telegramMessages)
++      ? candidate.telegramMessages
++          .map((ref) => sanitizePersistedTelegramRef(ref))
++          .filter(isPendingTelegramMessageRef)
++      : [];
++    seenIds.add(request.id);
++    out.push({
++      request,
++      targets,
++      telegramMessages,
++    });
++  }
++  return out;
++}
++
+ // Discord has component-based exec approvals; skip text fallback only when the
+ // Discord-specific handler is enabled for the same target account.
+ function shouldSkipDiscordForwarding(
+@@ -220,6 +406,29 @@ function normalizeTurnSourceChannel(value?: string | null): DeliverableMessageCh
+   return normalized && isDeliverableMessageChannel(normalized) ? normalized : undefined;
+ }
+ 
++function buildRequestButtons(
++  approvalId: string,
++): Array<Array<{ text: string; callback_data: string }>> | undefined {
++  const allowOnce = `/approve ${approvalId} allow-once`;
++  const allowAlways = `/approve ${approvalId} allow-always`;
++  const deny = `/approve ${approvalId} deny`;
++  const maxBytes = 64;
++  if (
++    Buffer.byteLength(allowOnce, "utf8") > maxBytes ||
++    Buffer.byteLength(allowAlways, "utf8") > maxBytes ||
++    Buffer.byteLength(deny, "utf8") > maxBytes
++  ) {
++    return undefined;
++  }
++  return [
++    [
++      { text: "Allow once", callback_data: allowOnce },
++      { text: "Always allow", callback_data: allowAlways },
++    ],
++    [{ text: "Deny", callback_data: deny }],
++  ];
++}
++
+ function defaultResolveSessionTarget(params: {
+   cfg: OpenClawConfig;
+   request: ExecApprovalRequest;
+@@ -264,7 +473,9 @@ async function deliverToTargets(params: {
+   text: string;
+   deliver: typeof deliverOutboundPayloads;
+   shouldSend?: () => boolean;
+-}) {
++  payloadForTarget?: (target: ForwardTarget) => ReplyPayload;
++}): Promise<Array<{ target: ForwardTarget; deliveries: OutboundDeliveryResult[] }>> {
++  const sent: Array<{ target: ForwardTarget; deliveries: OutboundDeliveryResult[] }> = [];
+   const deliveries = params.targets.map(async (target) => {
+     if (params.shouldSend && !params.shouldSend()) {
+       return;
+@@ -274,19 +485,97 @@ async function deliverToTargets(params: {
+       return;
+     }
+     try {
+-      await params.deliver({
++      const payload: ReplyPayload = params.payloadForTarget
++        ? params.payloadForTarget(target)
++        : { text: params.text };
++      const result = await params.deliver({
+         cfg: params.cfg,
+         channel,
+         to: target.to,
+         accountId: target.accountId,
+         threadId: target.threadId,
+-        payloads: [{ text: params.text }],
++        payloads: [payload],
+       });
++      sent.push({ target, deliveries: result });
+     } catch (err) {
+       log.error(`exec approvals: failed to deliver to ${channel}:${target.to}: ${String(err)}`);
+     }
+   });
+   await Promise.allSettled(deliveries);
++  return sent;
++}
++
++function collectTelegramMessageRefs(
++  deliveries: Array<{ target: ForwardTarget; deliveries: OutboundDeliveryResult[] }>,
++): PendingTelegramMessageRef[] {
++  const refs: PendingTelegramMessageRef[] = [];
++  for (const item of deliveries) {
++    const normalizedChannel = normalizeMessageChannel(item.target.channel) ?? item.target.channel;
++    if (normalizedChannel !== "telegram") {
++      continue;
++    }
++    const targetKey = buildTargetKey(item.target);
++    for (const delivery of item.deliveries) {
++      const chatId = typeof delivery.chatId === "string" ? delivery.chatId.trim() : "";
++      const messageId = typeof delivery.messageId === "string" ? delivery.messageId.trim() : "";
++      if (!chatId || !messageId) {
++        continue;
++      }
++      refs.push({
++        targetKey,
++        accountId: item.target.accountId,
++        chatId,
++        messageId,
++      });
++    }
++  }
++  return refs;
++}
++
++function buildFinalizedRequestMessage(params: {
++  request: ExecApprovalRequest;
++  statusText: string;
++  nowMs: number;
++}): string {
++  const combined = `${buildRequestMessage(params.request, params.nowMs)}\n\n${params.statusText}`;
++  if (combined.length <= 3900) {
++    return combined;
++  }
++  return `${params.statusText}\nID: ${params.request.id}`;
++}
++
++async function markPendingTelegramMessagesFinal(params: {
++  entry: PendingApproval;
++  statusText: string;
++  nowMs: number;
++  editTelegramMessage: typeof editMessageTelegram;
++}): Promise<Set<string>> {
++  const editedTargetKeys = new Set<string>();
++  const seen = new Set<string>();
++  const finalizedText = buildFinalizedRequestMessage({
++    request: params.entry.request,
++    statusText: params.statusText,
++    nowMs: params.nowMs,
++  });
++  for (const ref of params.entry.telegramMessages) {
++    const dedupeKey = `${ref.chatId}:${ref.messageId}`;
++    if (seen.has(dedupeKey)) {
++      continue;
++    }
++    seen.add(dedupeKey);
++    try {
++      await params.editTelegramMessage(ref.chatId, ref.messageId, finalizedText, {
++        accountId: ref.accountId,
++        buttons: [],
++      });
++      editedTargetKeys.add(ref.targetKey);
++    } catch (err) {
++      log.error(
++        `exec approvals: failed to edit telegram request ${ref.chatId}/${ref.messageId}: ${String(err)}`,
++      );
++    }
++  }
++  return editedTargetKeys;
+ }
+ 
+ function resolveForwardTargets(params: {
+@@ -336,9 +625,119 @@ export function createExecApprovalForwarder(
+ ): ExecApprovalForwarder {
+   const getConfig = deps.getConfig ?? loadConfig;
+   const deliver = deps.deliver ?? deliverOutboundPayloads;
++  const editTelegramMessage = deps.editTelegramMessage ?? editMessageTelegram;
+   const nowMs = deps.nowMs ?? Date.now;
+   const resolveSessionTarget = deps.resolveSessionTarget ?? defaultResolveSessionTarget;
++  const stateFilePath = resolveForwarderStateFilePath(deps.stateFilePath);
++  const withStateLock = createAsyncLock();
++  let recoveredFromState = false;
++  let statePersistenceEnabled = false;
+   const pending = new Map<string, PendingApproval>();
++  const finalized = new Map<string, FinalizedApproval>();
++
++  const pruneFinalized = () => {
++    const cutoff = nowMs() - FINALIZED_STATE_RETENTION_MS;
++    for (const [id, entry] of finalized) {
++      if (entry.finalizedAtMs <= cutoff) {
++        finalized.delete(id);
++      }
++    }
++    while (finalized.size > MAX_FINALIZED_STATE_ENTRIES) {
++      const oldestId = finalized.keys().next().value;
++      if (!oldestId) {
++        break;
++      }
++      finalized.delete(oldestId);
++    }
++  };
++
++  const rememberFinalized = (id: string, request: ExecApprovalRequest, statusText: string) => {
++    finalized.set(id, { request, statusText, finalizedAtMs: nowMs() });
++    pruneFinalized();
++  };
++
++  const getFinalized = (id: string): FinalizedApproval | undefined => {
++    pruneFinalized();
++    return finalized.get(id);
++  };
++
++  const snapshotPersistedState = (): PersistedForwarderState => ({
++    version: FORWARDER_STATE_VERSION,
++    updatedAtMs: nowMs(),
++    pending: Array.from(pending.values()).map((entry) => ({
++      request: entry.request,
++      targets: entry.targets.map((target) => ({
++        channel: target.channel,
++        to: target.to,
++        accountId: target.accountId,
++        threadId: target.threadId,
++        source: target.source,
++      })),
++      telegramMessages: entry.telegramMessages.map((ref) => ({ ...ref })),
++    })),
++  });
++
++  const persistPendingState = async () => {
++    if (!stateFilePath || !statePersistenceEnabled) {
++      return;
++    }
++    const snapshot = snapshotPersistedState();
++    await withStateLock(async () => {
++      await writeJsonAtomic(stateFilePath, snapshot);
++    });
++  };
++
++  const schedulePersistPendingState = () => {
++    if (!stateFilePath || !statePersistenceEnabled) {
++      return;
++    }
++    void persistPendingState().catch((err) => {
++      log.error(`exec approvals: failed to persist forwarder state: ${String(err)}`);
++    });
++  };
++
++  const recoverPendingFromState = async () => {
++    if (recoveredFromState) {
++      return;
++    }
++    recoveredFromState = true;
++    statePersistenceEnabled = Boolean(stateFilePath);
++    if (!stateFilePath) {
++      return;
++    }
++    const state = await readJsonFile<unknown>(stateFilePath);
++    const recoveredEntries = readPersistedPendingApprovals(state);
++    if (recoveredEntries.length === 0) {
++      await persistPendingState();
++      return;
++    }
++    log.info(
++      `exec approvals: recovering ${recoveredEntries.length} stale forwarded approvals after restart`,
++    );
++    const cfg = getConfig();
++    for (const recovered of recoveredEntries) {
++      const entry: PendingApproval = {
++        request: recovered.request,
++        targets: recovered.targets,
++        timeoutId: null,
++        telegramMessages: recovered.telegramMessages,
++      };
++      const expiredText = `⏱️ Exec approval expired after gateway restart. ID: ${recovered.request.id}`;
++      const editedTargetKeys = await markPendingTelegramMessagesFinal({
++        entry,
++        statusText: expiredText,
++        nowMs: nowMs(),
++        editTelegramMessage,
++      });
++      const followUpTargets = recovered.targets.filter(
++        (target) => !editedTargetKeys.has(buildTargetKey(target)),
++      );
++      if (followUpTargets.length > 0) {
++        await deliverToTargets({ cfg, targets: followUpTargets, text: expiredText, deliver });
++      }
++    }
++    await persistPendingState();
++  };
+ 
+   const handleRequested = async (request: ExecApprovalRequest): Promise<boolean> => {
+     const cfg = getConfig();
+@@ -357,6 +756,12 @@ export function createExecApprovalForwarder(
+       return false;
+     }
+ 
++    // Idempotency guard: duplicate "requested" events for the same approval ID
++    // must not re-send prompts or replace pending tracking.
++    if (pending.has(request.id) || getFinalized(request.id)) {
++      return true;
++    }
++
+     const expiresInMs = Math.max(0, request.expiresAtMs - nowMs());
+     const timeoutId = setTimeout(() => {
+       void (async () => {
+@@ -365,39 +770,103 @@ export function createExecApprovalForwarder(
+           return;
+         }
+         pending.delete(request.id);
++        schedulePersistPendingState();
+         const expiredText = buildExpiredMessage(request);
+-        await deliverToTargets({ cfg, targets: entry.targets, text: expiredText, deliver });
++        rememberFinalized(request.id, request, expiredText);
++        const editedTargetKeys = await markPendingTelegramMessagesFinal({
++          entry,
++          statusText: expiredText,
++          nowMs: nowMs(),
++          editTelegramMessage,
++        });
++        const followUpTargets = entry.targets.filter(
++          (target) => !editedTargetKeys.has(buildTargetKey(target)),
++        );
++        if (followUpTargets.length > 0) {
++          await deliverToTargets({ cfg, targets: followUpTargets, text: expiredText, deliver });
++        }
+       })();
+     }, expiresInMs);
+     timeoutId.unref?.();
+ 
+-    const pendingEntry: PendingApproval = { request, targets: filteredTargets, timeoutId };
++    const pendingEntry: PendingApproval = {
++      request,
++      targets: filteredTargets,
++      timeoutId,
++      telegramMessages: [],
++    };
+     pending.set(request.id, pendingEntry);
++    schedulePersistPendingState();
+ 
+     if (pending.get(request.id) !== pendingEntry) {
+       return false;
+     }
+ 
+     const text = buildRequestMessage(request, nowMs());
++    const requestButtons = buildRequestButtons(request.id);
+     void deliverToTargets({
+       cfg,
+       targets: filteredTargets,
+       text,
+       deliver,
+       shouldSend: () => pending.get(request.id) === pendingEntry,
+-    }).catch((err) => {
+-      log.error(`exec approvals: failed to deliver request ${request.id}: ${String(err)}`);
+-    });
++      payloadForTarget: (target) => {
++        const normalizedChannel = normalizeMessageChannel(target.channel) ?? target.channel;
++        if (normalizedChannel !== "telegram" || !requestButtons) {
++          return { text };
++        }
++        return {
++          text,
++          channelData: {
++            telegram: {
++              buttons: requestButtons,
++            },
++          },
++        };
++      },
++    })
++      .then(async (deliveries) => {
++        const deliveryRefs = collectTelegramMessageRefs(deliveries);
++        if (pending.get(request.id) !== pendingEntry) {
++          const finalizedEntry = getFinalized(request.id);
++          if (!finalizedEntry || deliveryRefs.length === 0) {
++            return;
++          }
++          const lateEntry: PendingApproval = {
++            request: finalizedEntry.request,
++            targets: filteredTargets,
++            timeoutId: null,
++            telegramMessages: deliveryRefs,
++          };
++          await markPendingTelegramMessagesFinal({
++            entry: lateEntry,
++            statusText: finalizedEntry.statusText,
++            nowMs: nowMs(),
++            editTelegramMessage,
++          });
++          return;
++        }
++        pendingEntry.telegramMessages = deliveryRefs;
++        schedulePersistPendingState();
++      })
++      .catch((err) => {
++        log.error(
++          `exec approvals: failed to deliver/finalize request ${request.id}: ${String(err)}`,
++        );
++      });
+     return true;
+   };
+ 
+   const handleResolved = async (resolved: ExecApprovalResolved) => {
+     const entry = pending.get(resolved.id);
++    const text = buildResolvedMessage(resolved);
+     if (entry) {
+       if (entry.timeoutId) {
+         clearTimeout(entry.timeoutId);
+       }
+       pending.delete(resolved.id);
++      schedulePersistPendingState();
++      rememberFinalized(resolved.id, entry.request, text);
+     }
+     const cfg = getConfig();
+     let targets = entry?.targets;
+@@ -409,6 +878,7 @@ export function createExecApprovalForwarder(
+         createdAtMs: resolved.ts,
+         expiresAtMs: resolved.ts,
+       };
++      rememberFinalized(resolved.id, request, text);
+       const config = cfg.approvals?.exec;
+       if (shouldForward({ config, request })) {
+         targets = resolveForwardTargets({
+@@ -422,8 +892,21 @@ export function createExecApprovalForwarder(
+     if (!targets || targets.length === 0) {
+       return;
+     }
+-    const text = buildResolvedMessage(resolved);
+-    await deliverToTargets({ cfg, targets, text, deliver });
++    const editedTargetKeys = entry
++      ? await markPendingTelegramMessagesFinal({
++          entry,
++          statusText: text,
++          nowMs: nowMs(),
++          editTelegramMessage,
++        })
++      : new Set<string>();
++    const followUpTargets = targets.filter(
++      (target) => !editedTargetKeys.has(buildTargetKey(target)),
++    );
++    if (followUpTargets.length === 0) {
++      return;
++    }
++    await deliverToTargets({ cfg, targets: followUpTargets, text, deliver });
+   };
+ 
+   const stop = () => {
+@@ -433,9 +916,11 @@ export function createExecApprovalForwarder(
+       }
+     }
+     pending.clear();
++    finalized.clear();
++    schedulePersistPendingState();
+   };
+ 
+-  return { handleRequested, handleResolved, stop };
++  return { handleRequested, handleResolved, recoverPendingFromState, stop };
+ }
+ 
+ export function shouldForwardExecApproval(params: {
+diff --git a/src/infra/exec-approvals.ts b/src/infra/exec-approvals.ts
+index c99eaeef1892..2a96f7c6ec84 100644
+--- a/src/infra/exec-approvals.ts
++++ b/src/infra/exec-approvals.ts
+@@ -55,12 +55,21 @@ export type ExecApprovalRequest = {
+   expiresAtMs: number;
+ };
+ 
++export type ExecApprovalResolveAudit = {
++  origin: "typed" | "button";
++  channel?: string;
++  surface?: string;
++  senderId?: string;
++  commandSource?: "text" | "native";
++};
++
+ export type ExecApprovalResolved = {
+   id: string;
+   decision: ExecApprovalDecision;
+   resolvedBy?: string | null;
+   ts: number;
+   request?: ExecApprovalRequest["request"];
++  audit?: ExecApprovalResolveAudit | null;
+ };
+ 
+ export type ExecApprovalsDefaults = {
+diff --git a/src/infra/outbound/deliver.test.ts b/src/infra/outbound/deliver.test.ts
+index ca6652b41b13..c4c223c87b7c 100644
+--- a/src/infra/outbound/deliver.test.ts
++++ b/src/infra/outbound/deliver.test.ts
+@@ -857,6 +857,154 @@ describe("deliverOutboundPayloads", () => {
+     );
+   });
+ 
++  it("prefers telegram adapter sendPayload for interactive channelData payloads", async () => {
++    const sendPayload = vi
++      .fn()
++      .mockResolvedValue({ channel: "telegram", messageId: "tg-adapter-1", chatId: "123" });
++    const sendText = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "txt-1" });
++    const sendMedia = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "med-1" });
++    setActivePluginRegistry(
++      createTestRegistry([
++        {
++          pluginId: "telegram",
++          plugin: createOutboundTestPlugin({
++            id: "telegram",
++            outbound: { deliveryMode: "direct", sendPayload, sendText, sendMedia },
++          }),
++          source: "test",
++        },
++      ]),
++    );
++
++    const sendTelegram = vi.fn().mockResolvedValue({ messageId: "tg-direct-1", chatId: "123" });
++    const buttons = [
++      [{ text: "Allow once", callback_data: "/approve abc allow-once" }],
++      [{ text: "Deny", callback_data: "/approve abc deny" }],
++    ];
++
++    const results = await deliverOutboundPayloads({
++      cfg: { channels: { telegram: { botToken: "tok-1" } } } as OpenClawConfig,
++      channel: "telegram",
++      to: "123",
++      payloads: [{ text: "Approval needed", channelData: { telegram: { buttons } } }],
++      deps: { sendTelegram },
++    });
++
++    expect(sendPayload).toHaveBeenCalledWith(
++      expect.objectContaining({
++        to: "123",
++        payload: expect.objectContaining({
++          channelData: { telegram: { buttons } },
++        }),
++      }),
++    );
++    expect(sendTelegram).not.toHaveBeenCalled();
++    expect(sendText).not.toHaveBeenCalled();
++    expect(results[0]).toMatchObject({ channel: "telegram", messageId: "tg-adapter-1" });
++  });
++
++  it("uses telegram direct-send fallback for channelData buttons when sendPayload is unavailable", async () => {
++    const sendText = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "txt-1" });
++    const sendMedia = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "med-1" });
++    setActivePluginRegistry(
++      createTestRegistry([
++        {
++          pluginId: "telegram",
++          plugin: createOutboundTestPlugin({
++            id: "telegram",
++            outbound: { deliveryMode: "direct", sendText, sendMedia },
++          }),
++          source: "test",
++        },
++      ]),
++    );
++
++    const sendTelegram = vi.fn().mockResolvedValue({ messageId: "tg-1", chatId: "123" });
++    const buttons = [
++      [{ text: "Allow once", callback_data: "/approve abc allow-once" }],
++      [{ text: "Deny", callback_data: "/approve abc deny" }],
++    ];
++
++    const results = await deliverOutboundPayloads({
++      cfg: { channels: { telegram: { botToken: "tok-1" } } } as OpenClawConfig,
++      channel: "telegram",
++      to: "123",
++      payloads: [{ text: "Approval needed", channelData: { telegram: { buttons } } }],
++      deps: { sendTelegram },
++    });
++
++    expect(sendTelegram).toHaveBeenCalledWith(
++      "123",
++      "Approval needed",
++      expect.objectContaining({ buttons, verbose: false }),
++    );
++    expect(sendText).not.toHaveBeenCalled();
++    expect(results[0]).toMatchObject({ channel: "telegram", messageId: "tg-1", chatId: "123" });
++  });
++
++  it("chunks telegram direct-send fallback text and keeps buttons on the first chunk only", async () => {
++    const sendText = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "txt-1" });
++    const sendMedia = vi.fn().mockResolvedValue({ channel: "telegram", messageId: "med-1" });
++    setActivePluginRegistry(
++      createTestRegistry([
++        {
++          pluginId: "telegram",
++          plugin: createOutboundTestPlugin({
++            id: "telegram",
++            outbound: {
++              deliveryMode: "direct",
++              chunker: (text, limit) => {
++                if (!text || limit <= 0 || text.length <= limit) {
++                  return [text];
++                }
++                return [text.slice(0, limit), text.slice(limit)];
++              },
++              textChunkLimit: 2,
++              sendText,
++              sendMedia,
++            },
++          }),
++          source: "test",
++        },
++      ]),
++    );
++
++    const sendTelegram = vi
++      .fn()
++      .mockResolvedValueOnce({ messageId: "tg-1", chatId: "123" })
++      .mockResolvedValueOnce({ messageId: "tg-2", chatId: "123" });
++    const buttons = [
++      [{ text: "Allow once", callback_data: "/approve abc allow-once" }],
++      [{ text: "Deny", callback_data: "/approve abc deny" }],
++    ];
++
++    const results = await deliverOutboundPayloads({
++      cfg: { channels: { telegram: { botToken: "tok-1", textChunkLimit: 2 } } } as OpenClawConfig,
++      channel: "telegram",
++      to: "123",
++      payloads: [{ text: "abcd", channelData: { telegram: { buttons } } }],
++      deps: { sendTelegram },
++    });
++
++    expect(sendTelegram).toHaveBeenCalledTimes(2);
++    expect(sendTelegram).toHaveBeenNthCalledWith(
++      1,
++      "123",
++      "ab",
++      expect.objectContaining({ buttons, verbose: false }),
++    );
++    expect(sendTelegram).toHaveBeenNthCalledWith(
++      2,
++      "123",
++      "cd",
++      expect.not.objectContaining({ buttons: expect.anything() }),
++    );
++    expect(sendText).not.toHaveBeenCalled();
++    expect(results).toHaveLength(2);
++    expect(results[0]).toMatchObject({ channel: "telegram", messageId: "tg-1", chatId: "123" });
++    expect(results[1]).toMatchObject({ channel: "telegram", messageId: "tg-2", chatId: "123" });
++  });
++
+   it("preserves channelData-only payloads with empty text for non-WhatsApp sendPayload channels", async () => {
+     const sendPayload = vi.fn().mockResolvedValue({ channel: "line", messageId: "ln-1" });
+     const sendText = vi.fn();
+diff --git a/src/infra/outbound/deliver.ts b/src/infra/outbound/deliver.ts
+index ac1e957c73dd..50485c2bf613 100644
+--- a/src/infra/outbound/deliver.ts
++++ b/src/infra/outbound/deliver.ts
+@@ -33,7 +33,7 @@ import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+ import { markdownToSignalTextChunks, type SignalTextStyleRange } from "../../signal/format.js";
+ import { sendMessageSignal } from "../../signal/send.js";
+ import type { sendMessageSlack } from "../../slack/send.js";
+-import type { sendMessageTelegram } from "../../telegram/send.js";
++import { sendMessageTelegram } from "../../telegram/send.js";
+ import type { sendMessageWhatsApp } from "../../web/outbound.js";
+ import { throwIfAborted } from "./abort.js";
+ import { ackDelivery, enqueueDelivery, failDelivery } from "./delivery-queue.js";
+@@ -115,6 +115,21 @@ type ChannelHandler = {
+   ) => Promise<OutboundDeliveryResult>;
+ };
+ 
++function parseThreadIdForTelegram(threadId?: string | number | null): number | undefined {
++  if (typeof threadId === "number" && Number.isFinite(threadId)) {
++    return Math.trunc(threadId);
++  }
++  if (typeof threadId !== "string") {
++    return undefined;
++  }
++  const trimmed = threadId.trim();
++  if (!trimmed) {
++    return undefined;
++  }
++  const parsed = Number.parseInt(trimmed, 10);
++  return Number.isFinite(parsed) ? parsed : undefined;
++}
++
+ type ChannelHandlerParams = {
+   cfg: OpenClawConfig;
+   channel: Exclude<OutboundChannel, "none">;
+@@ -550,45 +565,44 @@ async function deliverOutboundPayloadsCore(
+   const signalMaxBytes = isSignalChannel
+     ? resolveChannelMediaMaxBytes({
+         cfg,
+-        resolveChannelLimitMb: ({ cfg, accountId }) =>
+-          cfg.channels?.signal?.accounts?.[accountId]?.mediaMaxMb ??
+-          cfg.channels?.signal?.mediaMaxMb,
++        resolveChannelLimitMb: ({ cfg: channelCfg, accountId: channelAccountId }) =>
++          channelCfg.channels?.signal?.accounts?.[channelAccountId]?.mediaMaxMb ??
++          channelCfg.channels?.signal?.mediaMaxMb,
+         accountId,
+       })
+     : undefined;
+-
+-  const sendTextChunks = async (
+-    text: string,
+-    overrides?: { replyToId?: string | null; threadId?: string | number | null },
+-  ) => {
+-    throwIfAborted(abortSignal);
++  const splitTextChunks = (sourceText: string): string[] => {
+     if (!handler.chunker || textLimit === undefined) {
+-      results.push(await handler.sendText(text, overrides));
+-      return;
++      return [sourceText];
+     }
+     if (chunkMode === "newline") {
+       const mode = handler.chunkerMode ?? "text";
+       const blockChunks =
+         mode === "markdown"
+-          ? chunkMarkdownTextWithMode(text, textLimit, "newline")
+-          : chunkByParagraph(text, textLimit);
+-
+-      if (!blockChunks.length && text) {
+-        blockChunks.push(text);
++          ? chunkMarkdownTextWithMode(sourceText, textLimit, "newline")
++          : chunkByParagraph(sourceText, textLimit);
++      if (!blockChunks.length && sourceText) {
++        blockChunks.push(sourceText);
+       }
++      const nextChunks: string[] = [];
+       for (const blockChunk of blockChunks) {
+         const chunks = handler.chunker(blockChunk, textLimit);
+         if (!chunks.length && blockChunk) {
+           chunks.push(blockChunk);
+         }
+-        for (const chunk of chunks) {
+-          throwIfAborted(abortSignal);
+-          results.push(await handler.sendText(chunk, overrides));
+-        }
++        nextChunks.push(...chunks);
+       }
+-      return;
++      return nextChunks;
+     }
+-    const chunks = handler.chunker(text, textLimit);
++    return handler.chunker(sourceText, textLimit);
++  };
++
++  const sendTextChunks = async (
++    text: string,
++    overrides?: { replyToId?: string | null; threadId?: string | number | null },
++  ) => {
++    throwIfAborted(abortSignal);
++    const chunks = splitTextChunks(text);
+     for (const chunk of chunks) {
+       throwIfAborted(abortSignal);
+       results.push(await handler.sendText(chunk, overrides));
+@@ -706,6 +720,49 @@ async function deliverOutboundPayloadsCore(
+         });
+         continue;
+       }
++      // Legacy compatibility path while adapters migrate to sendPayload.
++      if (channel === "telegram" && !handler.sendPayload && effectivePayload.channelData) {
++        const telegramData = effectivePayload.channelData.telegram as
++          | {
++              buttons?: Array<Array<{ text?: string; callback_data?: string }>>;
++              quoteText?: string;
++            }
++          | undefined;
++        const buttons = telegramData?.buttons;
++        const hasButtons = Array.isArray(buttons) && buttons.length > 0;
++        if (hasButtons) {
++          const sendTelegram = params.deps?.sendTelegram ?? sendMessageTelegram;
++          const chunks = splitTextChunks(payloadSummary.text);
++          if (chunks.length === 0) {
++            chunks.push(payloadSummary.text);
++          }
++          let lastMessageId: string | undefined;
++          for (let i = 0; i < chunks.length; i += 1) {
++            const chunk = chunks[i] ?? "";
++            const isFirstChunk = i === 0;
++            const result = await sendTelegram(to, chunk, {
++              verbose: false,
++              accountId: accountId ?? undefined,
++              messageThreadId: parseThreadIdForTelegram(params.threadId),
++              quoteText:
++                isFirstChunk && typeof telegramData?.quoteText === "string"
++                  ? telegramData.quoteText
++                  : undefined,
++              buttons: isFirstChunk
++                ? (buttons as Array<Array<{ text: string; callback_data: string }>>)
++                : undefined,
++            });
++            results.push({ channel: "telegram", ...result });
++            lastMessageId = result.messageId;
++          }
++          emitMessageSent({
++            success: true,
++            content: payloadSummary.text,
++            messageId: lastMessageId,
++          });
++          continue;
++        }
++      }
+       if (payloadSummary.mediaUrls.length === 0) {
+         const beforeCount = results.length;
+         if (isSignalChannel) {
+diff --git a/src/telegram/bot-handlers.ts b/src/telegram/bot-handlers.ts
+index 6df34fe2c608..bc1bd0c815d5 100644
+--- a/src/telegram/bot-handlers.ts
++++ b/src/telegram/bot-handlers.ts
+@@ -1293,6 +1293,7 @@ export const registerTelegramHandlers = ({
+           await processMessage(buildSyntheticContext(ctx, syntheticMessage), [], storeAllowFrom, {
+             forceWasMentioned: true,
+             messageIdOverride: callback.id,
++            approvalCommandOrigin: "button",
+           });
+           return;
+         }
+@@ -1305,10 +1306,38 @@ export const registerTelegramHandlers = ({
+         from: callback.from,
+         text: data,
+       });
+-      await processMessage(buildSyntheticContext(ctx, syntheticMessage), [], storeAllowFrom, {
+-        forceWasMentioned: true,
+-        messageIdOverride: callback.id,
+-      });
++      const isApprovalCallback = /^\/approve\s+\S+\s+(allow-once|allow-always|deny)\s*$/i.test(
++        data,
++      );
++      const result = await processMessage(
++        buildSyntheticContext(ctx, syntheticMessage),
++        [],
++        storeAllowFrom,
++        {
++          forceWasMentioned: true,
++          messageIdOverride: callback.id,
++          approvalCommandOrigin: "button",
++        },
++      );
++      if (isApprovalCallback && result.approvalCommandResolved) {
++        const callbackText =
++          typeof callbackMessage.text === "string"
++            ? callbackMessage.text
++            : typeof callbackMessage.caption === "string"
++              ? callbackMessage.caption
++              : "";
++        if (callbackText) {
++          try {
++            await editCallbackMessage(callbackText, { reply_markup: { inline_keyboard: [] } });
++          } catch (editErr) {
++            const errStr = String(editErr);
++            if (!errStr.includes("message is not modified")) {
++              logVerbose(`telegram approval callback button cleanup failed: ${errStr}`);
++            }
++          }
++        }
++      }
++      return;
+     } catch (err) {
+       runtime.error?.(danger(`callback handler failed: ${String(err)}`));
+     }
+diff --git a/src/telegram/bot-message-context.sender-prefix.test.ts b/src/telegram/bot-message-context.sender-prefix.test.ts
+index f49dd2837962..a11d273ec8f3 100644
+--- a/src/telegram/bot-message-context.sender-prefix.test.ts
++++ b/src/telegram/bot-message-context.sender-prefix.test.ts
+@@ -39,4 +39,14 @@ describe("buildTelegramMessageContext sender prefix", () => {
+     expect(ctx).not.toBeNull();
+     expect(ctx?.ctxPayload?.MessageSid).toBe("67890");
+   });
++
++  it("propagates approval command origin from options", async () => {
++    const ctx = await buildCtx({
++      messageId: 12345,
++      options: { approvalCommandOrigin: "button" },
++    });
++
++    expect(ctx).not.toBeNull();
++    expect(ctx?.ctxPayload?.ApprovalCommandOrigin).toBe("button");
++  });
+ });
+diff --git a/src/telegram/bot-message-context.ts b/src/telegram/bot-message-context.ts
+index 7927af7f94d4..5b71ce6ae8a4 100644
+--- a/src/telegram/bot-message-context.ts
++++ b/src/telegram/bot-message-context.ts
+@@ -86,6 +86,7 @@ export type TelegramMediaRef = {
+ type TelegramMessageContextOptions = {
+   forceWasMentioned?: boolean;
+   messageIdOverride?: string;
++  approvalCommandOrigin?: "typed" | "button";
+ };
+ 
+ type TelegramLogger = {
+@@ -757,6 +758,7 @@ export const buildTelegramMessageContext = async ({
+     ForwardedDate: forwardOrigin?.date ? forwardOrigin.date * 1000 : undefined,
+     Timestamp: msg.date ? msg.date * 1000 : undefined,
+     WasMentioned: isGroup ? effectiveWasMentioned : undefined,
++    ApprovalCommandOrigin: options?.approvalCommandOrigin,
+     // Filter out cached stickers from current-message media; reply media is still valid context.
+     MediaPath: contextMedia.length > 0 ? contextMedia[0]?.path : undefined,
+     MediaType: contextMedia.length > 0 ? contextMedia[0]?.contentType : undefined,
+diff --git a/src/telegram/bot-message-dispatch.ts b/src/telegram/bot-message-dispatch.ts
+index c72ed3f59b04..6d789544568e 100644
+--- a/src/telegram/bot-message-dispatch.ts
++++ b/src/telegram/bot-message-dispatch.ts
+@@ -42,6 +42,8 @@ import { editMessageTelegram } from "./send.js";
+ import { cacheSticker, describeStickerImage } from "./sticker-cache.js";
+ 
+ const EMPTY_RESPONSE_FALLBACK = "No response generated. Please try again.";
++const APPROVAL_COMMAND_RE = /^\/approve\s+\S+\s+(allow-once|allow-always|deny)\s*$/i;
++const APPROVAL_SUCCESS_REPLY_RE = /\bExec approval\s+(allow-once|allow-always|deny)\s+submitted\b/i;
+ 
+ /** Minimum chars before sending first streaming message (improves push notification UX) */
+ const DRAFT_MIN_INITIAL_CHARS = 30;
+@@ -103,6 +105,10 @@ type DispatchTelegramMessageParams = {
+   opts: Pick<TelegramBotOptions, "token">;
+ };
+ 
++export type DispatchTelegramMessageResult = {
++  approvalCommandResolved: boolean;
++};
++
+ type TelegramReasoningLevel = "off" | "on" | "stream";
+ 
+ function resolveTelegramReasoningLevel(params: {
+@@ -138,7 +144,7 @@ export const dispatchTelegramMessage = async ({
+   textLimit,
+   telegramCfg,
+   opts,
+-}: DispatchTelegramMessageParams) => {
++}: DispatchTelegramMessageParams): Promise<DispatchTelegramMessageResult> => {
+   const {
+     ctxPayload,
+     msg,
+@@ -159,6 +165,10 @@ export const dispatchTelegramMessage = async ({
+   } = context;
+ 
+   const draftMaxChars = Math.min(textLimit, 4096);
++  const inboundCommandText =
++    typeof msg.text === "string" ? msg.text : typeof msg.caption === "string" ? msg.caption : "";
++  const isApprovalCommand = APPROVAL_COMMAND_RE.test(inboundCommandText.trim());
++  let approvalCommandResolved = false;
+   const tableMode = resolveMarkdownTableMode({
+     cfg,
+     channel: "telegram",
+@@ -501,6 +511,14 @@ export const dispatchTelegramMessage = async ({
+         ...prefixOptions,
+         typingCallbacks,
+         deliver: async (payload, info) => {
++          if (
++            isApprovalCommand &&
++            info.kind === "final" &&
++            typeof payload.text === "string" &&
++            APPROVAL_SUCCESS_REPLY_RE.test(payload.text)
++          ) {
++            approvalCommandResolved = true;
++          }
+           const previewButtons = (
+             payload.channelData?.telegram as { buttons?: TelegramInlineButtons } | undefined
+           )?.buttons;
+@@ -726,7 +744,7 @@ export const dispatchTelegramMessage = async ({
+ 
+   if (!hasFinalResponse) {
+     clearGroupHistory();
+-    return;
++    return { approvalCommandResolved };
+   }
+ 
+   if (statusReactionController) {
+@@ -753,4 +771,5 @@ export const dispatchTelegramMessage = async ({
+     });
+   }
+   clearGroupHistory();
++  return { approvalCommandResolved };
+ };
+diff --git a/src/telegram/bot-message.ts b/src/telegram/bot-message.ts
+index 15fb1bc943de..c80e002ae795 100644
+--- a/src/telegram/bot-message.ts
++++ b/src/telegram/bot-message.ts
+@@ -6,7 +6,10 @@ import {
+   type BuildTelegramMessageContextParams,
+   type TelegramMediaRef,
+ } from "./bot-message-context.js";
+-import { dispatchTelegramMessage } from "./bot-message-dispatch.js";
++import {
++  dispatchTelegramMessage,
++  type DispatchTelegramMessageResult,
++} from "./bot-message-dispatch.js";
+ import type { TelegramBotOptions } from "./bot.js";
+ import type { TelegramContext, TelegramStreamMode } from "./bot/types.js";
+ 
+@@ -51,9 +54,13 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
+     primaryCtx: TelegramContext,
+     allMedia: TelegramMediaRef[],
+     storeAllowFrom: string[],
+-    options?: { messageIdOverride?: string; forceWasMentioned?: boolean },
++    options?: {
++      messageIdOverride?: string;
++      forceWasMentioned?: boolean;
++      approvalCommandOrigin?: "typed" | "button";
++    },
+     replyMedia?: TelegramMediaRef[],
+-  ) => {
++  ): Promise<DispatchTelegramMessageResult> => {
+     const context = await buildTelegramMessageContext({
+       primaryCtx,
+       allMedia,
+@@ -76,9 +83,9 @@ export const createTelegramMessageProcessor = (deps: TelegramMessageProcessorDep
+       sendChatActionHandler,
+     });
+     if (!context) {
+-      return;
++      return { approvalCommandResolved: false };
+     }
+-    await dispatchTelegramMessage({
++    return await dispatchTelegramMessage({
+       context,
+       bot,
+       cfg,
+diff --git a/src/telegram/bot-native-commands.ts b/src/telegram/bot-native-commands.ts
+index efe5821005aa..862d95877695 100644
+--- a/src/telegram/bot-native-commands.ts
++++ b/src/telegram/bot-native-commands.ts
+@@ -108,9 +108,10 @@ export type RegisterTelegramHandlerParams = {
+     options?: {
+       messageIdOverride?: string;
+       forceWasMentioned?: boolean;
++      approvalCommandOrigin?: "typed" | "button";
+     },
+     replyMedia?: TelegramMediaRef[],
+-  ) => Promise<void>;
++  ) => Promise<{ approvalCommandResolved: boolean }>;
+   logger: ReturnType<typeof getChildLogger>;
+ };
+ 
+diff --git a/src/telegram/bot.test.ts b/src/telegram/bot.test.ts
+index 69a94c3e200f..dad9cfdce204 100644
+--- a/src/telegram/bot.test.ts
++++ b/src/telegram/bot.test.ts
+@@ -467,6 +467,74 @@ describe("createTelegramBot", () => {
+     expect(answerCallbackQuerySpy).toHaveBeenCalledWith("cbq-model-compact-2");
+   });
+ 
++  it("removes approval inline buttons only after successful approval resolve", async () => {
++    onSpy.mockClear();
++    editMessageTextSpy.mockClear();
++    replySpy.mockClear();
++    replySpy.mockResolvedValueOnce({
++      text: "✅ Exec approval allow-once submitted for abc.",
++    });
++
++    createTelegramBot({ token: "tok" });
++    const callbackHandler = onSpy.mock.calls.find((call) => call[0] === "callback_query")?.[1] as (
++      ctx: Record<string, unknown>,
++    ) => Promise<void>;
++    expect(callbackHandler).toBeDefined();
++
++    await callbackHandler({
++      callbackQuery: {
++        id: "cbq-approve-1",
++        data: "/approve abc allow-once",
++        from: { id: 9, first_name: "Ada", username: "ada_bot" },
++        message: {
++          chat: { id: 1234, type: "private" },
++          date: 1736380800,
++          message_id: 44,
++          text: "Approval requested",
++        },
++      },
++      me: { username: "openclaw_bot" },
++      getFile: async () => ({ download: async () => new Uint8Array() }),
++    });
++
++    expect(editMessageTextSpy).toHaveBeenCalledWith(1234, 44, "Approval requested", {
++      reply_markup: { inline_keyboard: [] },
++    });
++  });
++
++  it("keeps approval inline buttons when approval resolve is rejected", async () => {
++    onSpy.mockClear();
++    editMessageTextSpy.mockClear();
++    replySpy.mockClear();
++    replySpy.mockResolvedValueOnce({
++      text: "❌ Failed to submit approval: temporary gateway failure",
++    });
++
++    createTelegramBot({ token: "tok" });
++    const callbackHandler = onSpy.mock.calls.find((call) => call[0] === "callback_query")?.[1] as (
++      ctx: Record<string, unknown>,
++    ) => Promise<void>;
++    expect(callbackHandler).toBeDefined();
++
++    await callbackHandler({
++      callbackQuery: {
++        id: "cbq-approve-2",
++        data: "/approve abc allow-once",
++        from: { id: 9, first_name: "Ada", username: "ada_bot" },
++        message: {
++          chat: { id: 1234, type: "private" },
++          date: 1736380800,
++          message_id: 45,
++          text: "Approval requested",
++        },
++      },
++      me: { username: "openclaw_bot" },
++      getFile: async () => ({ download: async () => new Uint8Array() }),
++    });
++
++    expect(editMessageTextSpy).not.toHaveBeenCalled();
++  });
++
+   it("includes sender identity in group envelope headers", async () => {
+     onSpy.mockClear();
+     replySpy.mockClear();
+diff --git a/src/telegram/sequential-key.test.ts b/src/telegram/sequential-key.test.ts
+index 7dc09af2596a..2e74be834b7e 100644
+--- a/src/telegram/sequential-key.test.ts
++++ b/src/telegram/sequential-key.test.ts
+@@ -41,6 +41,42 @@ describe("getTelegramSequentialKey", () => {
+       "telegram:123:topic:1",
+     ],
+     [{ update: { message: mockMessage({ chat: mockChat({ id: 555 }) }) } }, "telegram:555"],
++    [
++      {
++        update: {
++          callback_query: {
++            data: "mdl_sel_openai/gpt-4o",
++            message: mockMessage({ chat: mockChat({ id: 555, type: "private" }) }),
++          },
++        },
++      },
++      "telegram:555",
++    ],
++    [
++      {
++        update: {
++          callback_query: {
++            data: "mdl_sel_openai/gpt-4o",
++            message: mockMessage({
++              chat: mockChat({ id: 555, type: "supergroup", is_forum: true }),
++              message_thread_id: 7,
++            }),
++          },
++        },
++      },
++      "telegram:555:topic:7",
++    ],
++    [
++      {
++        update: {
++          callback_query: {
++            data: "/approve abc allow-once",
++            message: mockMessage({ chat: mockChat({ id: 555, type: "private" }) }),
++          },
++        },
++      },
++      "telegram:555:control",
++    ],
+     [
+       {
+         channelPost: mockMessage({ chat: mockChat({ id: -100777111222, type: "channel" }) }),
+diff --git a/src/telegram/sequential-key.ts b/src/telegram/sequential-key.ts
+index 3e787055e0d8..4389e468229f 100644
+--- a/src/telegram/sequential-key.ts
++++ b/src/telegram/sequential-key.ts
+@@ -13,16 +13,49 @@ export type TelegramSequentialKeyContext = {
+     edited_message?: Message;
+     channel_post?: Message;
+     edited_channel_post?: Message;
+-    callback_query?: { message?: Message };
++    callback_query?: { data?: string; message?: Message };
+     message_reaction?: { chat?: { id?: number } };
+   };
+ };
+ 
++const APPROVAL_CALLBACK_COMMAND_RE = /^\/approve\s+\S+\s+(allow-once|allow-always|deny)\s*$/i;
++
++function isControlCallbackQueryData(data: string | undefined, botUsername?: string): boolean {
++  const normalized = data?.trim();
++  if (!normalized) {
++    return false;
++  }
++  if (APPROVAL_CALLBACK_COMMAND_RE.test(normalized)) {
++    return true;
++  }
++  return isAbortRequestText(normalized, botUsername ? { botUsername } : undefined);
++}
++
+ export function getTelegramSequentialKey(ctx: TelegramSequentialKeyContext): string {
+   const reaction = ctx.update?.message_reaction;
+   if (reaction?.chat?.id) {
+     return `telegram:${reaction.chat.id}`;
+   }
++  const callbackMsg = ctx.update?.callback_query?.message;
++  if (callbackMsg?.chat?.id) {
++    const callbackData = ctx.update?.callback_query?.data;
++    const isControlCallback = isControlCallbackQueryData(callbackData, ctx.me?.username);
++    const callbackChatId = callbackMsg.chat.id;
++    const callbackIsGroup =
++      callbackMsg.chat.type === "group" || callbackMsg.chat.type === "supergroup";
++    const callbackThreadId = callbackIsGroup
++      ? resolveTelegramForumThreadId({
++          isForum: callbackMsg.chat.is_forum,
++          messageThreadId: callbackMsg.message_thread_id,
++        })
++      : callbackMsg.message_thread_id;
++    if (callbackThreadId != null) {
++      return isControlCallback
++        ? `telegram:${callbackChatId}:topic:${callbackThreadId}:control`
++        : `telegram:${callbackChatId}:topic:${callbackThreadId}`;
++    }
++    return isControlCallback ? `telegram:${callbackChatId}:control` : `telegram:${callbackChatId}`;
++  }
+   const msg =
+     ctx.message ??
+     ctx.channelPost ??
+@@ -30,8 +63,7 @@ export function getTelegramSequentialKey(ctx: TelegramSequentialKeyContext): str
+     ctx.update?.message ??
+     ctx.update?.edited_message ??
+     ctx.update?.channel_post ??
+-    ctx.update?.edited_channel_post ??
+-    ctx.update?.callback_query?.message;
++    ctx.update?.edited_channel_post;
+   const chatId = msg?.chat?.id ?? ctx.chat?.id;
+   const rawText = msg?.text ?? msg?.caption;
+   const botUsername = ctx.me?.username;

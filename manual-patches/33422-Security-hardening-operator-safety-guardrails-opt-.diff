@@ -1,0 +1,653 @@
+diff --git a/SECURITY.md b/SECURITY.md
+index 78a18b606db6..80c648f3c332 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -206,6 +206,39 @@ For threat model + hardening guidance (including `openclaw security audit --deep
+ 
+ - `https://docs.openclaw.ai/gateway/security`
+ 
++### Operator safety foot-guns and expectations
++
++These are default behaviors worth understanding. None are vulnerabilities — they're documented tradeoffs in OpenClaw's one-operator trust model. Each has opt-in mitigations for operators who want tighter guardrails.
++
++#### Sandbox execution fallthrough
++
++When `agents.defaults.sandbox.mode` is `non-main` or `all`, OpenClaw routes tool execution to a Docker container. If Docker is unavailable at runtime (not installed, daemon stopped, permission denied), execution **falls through to the host** silently. This is by design — it keeps the gateway functional — but may surprise operators who assume sandbox mode guarantees isolation.
++
++- `openclaw doctor` warns when sandbox mode is enabled but Docker is unreachable.
++- Set `agents.defaults.sandbox.requireAvailable: true` to make the gateway refuse to start when Docker is unavailable while sandbox mode is enabled. This converts a silent fallthrough into a hard startup failure.
++
++#### Model failover tool-access inheritance
++
++When the primary model fails (rate limit, outage, auth error), OpenClaw automatically falls back to the next model in the configured list. The fallback model inherits the same tool permissions and session context as the primary. If the fallback model is less capable (smaller context window, no reasoning support), it may handle dangerous tools with less judgment.
++
++- The gateway logs a warning whenever a fallback model is used instead of the primary.
++- `openclaw doctor` checks whether fallback models have significantly reduced context windows or missing reasoning capabilities compared to the primary, and warns if dangerous tools are available.
++- Review your model list ordering with tool access in mind, not just cost.
++
++#### Voice-originated commands and dangerous tools
++
++Voice transcripts are inherently lossy — homophones, ambient noise, and transcription errors can produce tool invocations the operator did not intend. When voice input drives a tool-enabled agent, there is no visual confirmation step before execution.
++
++- Set `voice.requireConfirmForDangerousTools: true` to inject a system-prompt hint asking the model to confirm before executing destructive or irreversible tools when the input originated from voice.
++- This is a soft guardrail (model-level, not policy-enforced) and depends on model compliance. It reduces accidental execution but does not guarantee it.
++
++#### Command queue memory growth
++
++The gateway command queue is unbounded by default. Under sustained high-rate input (automated senders, webhook floods, runaway cron jobs), the queue can grow without limit, consuming memory until the process is killed by the OS.
++
++- Set `gateway.maxCommandQueueSize` to a positive integer (default: `500`) to cap queue depth per lane. When the cap is reached, the oldest queued entry is dropped to make room.
++- Set to `0` to explicitly disable the bound (unbounded, legacy behavior). The gateway logs a warning at startup when unbounded mode is active.
++
+ ### Tool filesystem hardening
+ 
+ - `tools.exec.applyPatch.workspaceOnly: true` (recommended): keeps `apply_patch` writes/deletes within the configured workspace directory.
+diff --git a/src/agents/model-fallback.ts b/src/agents/model-fallback.ts
+index e40f0f9e24d5..b8acb7a07b48 100644
+--- a/src/agents/model-fallback.ts
++++ b/src/agents/model-fallback.ts
+@@ -3,6 +3,7 @@ import {
+   resolveAgentModelFallbackValues,
+   resolveAgentModelPrimaryValue,
+ } from "../config/model-input.js";
++import { logWarn } from "../logger.js";
+ import {
+   ensureAuthProfileStore,
+   getSoonestCooldownExpiry,
+@@ -502,6 +503,18 @@ export async function runWithModelFallback<T>(params: {
+ 
+     const attemptRun = await runFallbackAttempt({ run: params.run, ...candidate, attempts });
+     if ("success" in attemptRun) {
++      // Warn when a fallback (non-primary) model was used. Fallback models
++      // inherit the same tool access as the primary, which may be a safety
++      // concern if the fallback has reduced capability.
++      if (i > 0) {
++        const primaryRef = `${candidates[0].provider}/${candidates[0].model}`;
++        const fallbackRef = `${candidate.provider}/${candidate.model}`;
++        logWarn(
++          `model failover: using fallback "${fallbackRef}" instead of primary "${primaryRef}". ` +
++            "Fallback model inherits the same tool access. " +
++            "Review fallback configuration if this is unexpected.",
++        );
++      }
+       return attemptRun.success;
+     }
+     const err = attemptRun.error;
+diff --git a/src/agents/pi-embedded-runner/run/attempt.ts b/src/agents/pi-embedded-runner/run/attempt.ts
+index 63898d4dfe0d..d16258271262 100644
+--- a/src/agents/pi-embedded-runner/run/attempt.ts
++++ b/src/agents/pi-embedded-runner/run/attempt.ts
+@@ -770,11 +770,34 @@ export async function runEmbeddedAttempt(
+     const ttsHint = params.config ? buildTtsSystemPromptHint(params.config) : undefined;
+     const ownerDisplay = resolveOwnerDisplaySetting(params.config);
+ 
++    // Voice safety: when input originated from voice and the operator has
++    // enabled voice.requireConfirmForDangerousTools, inject a system prompt
++    // hint instructing the model to request explicit confirmation before
++    // using dangerous tools (exec, fs write, message send).
++    const voiceSafetyHint = (() => {
++      if (!params.inputProvenance || params.inputProvenance.sourceChannel !== "voice") {
++        return undefined;
++      }
++      if (params.config?.voice?.requireConfirmForDangerousTools !== true) {
++        return undefined;
++      }
++      return (
++        "VOICE INPUT SAFETY: This message originated from voice input (speech-to-text). " +
++        "Before executing any potentially dangerous tool (system commands, file writes, " +
++        "message sends, or destructive operations), you MUST ask the user for explicit " +
++        "confirmation first. Describe what you intend to do and wait for approval. " +
++        "Read-only operations (file reads, searches, status checks) may proceed without confirmation."
++      );
++    })();
++
++    const effectiveExtraSystemPrompt =
++      [params.extraSystemPrompt, voiceSafetyHint].filter(Boolean).join("\n\n") || undefined;
++
+     const appendPrompt = buildEmbeddedSystemPrompt({
+       workspaceDir: effectiveWorkspace,
+       defaultThinkLevel: params.thinkLevel,
+       reasoningLevel: params.reasoningLevel ?? "off",
+-      extraSystemPrompt: params.extraSystemPrompt,
++      extraSystemPrompt: effectiveExtraSystemPrompt,
+       ownerNumbers: params.ownerNumbers,
+       ownerDisplay: ownerDisplay.ownerDisplay,
+       ownerDisplaySecret: ownerDisplay.ownerDisplaySecret,
+diff --git a/src/commands/doctor-model-failover.ts b/src/commands/doctor-model-failover.ts
+new file mode 100644
+index 000000000000..025fe0e9e65a
+--- /dev/null
++++ b/src/commands/doctor-model-failover.ts
+@@ -0,0 +1,111 @@
++import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
++import { loadModelCatalog, type ModelCatalogEntry } from "../agents/model-catalog.js";
++import { resolveConfiguredModelRef } from "../agents/model-selection.js";
++import { formatCliCommand } from "../cli/command-format.js";
++import type { OpenClawConfig } from "../config/config.js";
++import { resolveAgentModelFallbackValues } from "../config/model-input.js";
++import { note } from "../terminal/note.js";
++
++/**
++ * Doctor check: warn when configured fallback models have significantly lower
++ * capability than the primary model while still receiving full tool access.
++ *
++ * This does NOT block fallback — it only surfaces warnings so operators
++ * are aware of the capability mismatch.
++ */
++export async function noteModelFailoverSafetyWarnings(cfg: OpenClawConfig) {
++  const warnings: string[] = [];
++
++  const { provider: primaryProvider, model: primaryModel } = resolveConfiguredModelRef({
++    cfg,
++    defaultProvider: DEFAULT_PROVIDER,
++    defaultModel: DEFAULT_MODEL,
++  });
++
++  const fallbacks = resolveAgentModelFallbackValues(cfg.agents?.defaults?.model);
++  if (fallbacks.length === 0) {
++    return;
++  }
++
++  let catalog: ModelCatalogEntry[];
++  try {
++    catalog = await loadModelCatalog({ config: cfg });
++  } catch {
++    // If catalog is unavailable, skip this check gracefully
++    return;
++  }
++
++  const findEntry = (provider: string, model: string): ModelCatalogEntry | undefined => {
++    return catalog.find(
++      (e) =>
++        e.provider.toLowerCase() === provider.toLowerCase() &&
++        e.id.toLowerCase() === model.toLowerCase(),
++    );
++  };
++
++  const primaryEntry = findEntry(primaryProvider, primaryModel);
++  const primaryContextWindow = primaryEntry?.contextWindow ?? 0;
++  const primaryReasoning = primaryEntry?.reasoning === true;
++
++  // Check exec/tool configuration — are dangerous tools available?
++  const execSecurity = cfg.tools?.exec?.security ?? "allowlist";
++  const hasDangerousToolAccess = execSecurity !== "deny";
++
++  if (!hasDangerousToolAccess) {
++    // No dangerous tool access configured, no safety concern
++    return;
++  }
++
++  for (const raw of fallbacks) {
++    const parts = raw.split("/");
++    const fallbackProvider = parts.length > 1 ? parts[0] : primaryProvider;
++    const fallbackModel = parts.length > 1 ? parts.slice(1).join("/") : raw;
++    const fallbackEntry = findEntry(fallbackProvider, fallbackModel);
++
++    if (!fallbackEntry) {
++      warnings.push(
++        `- Fallback model "${raw}" not found in catalog. Cannot verify tool-use capability.`,
++      );
++      continue;
++    }
++
++    const concerns: string[] = [];
++
++    // Context window significantly smaller
++    if (
++      primaryContextWindow > 0 &&
++      fallbackEntry.contextWindow &&
++      fallbackEntry.contextWindow < primaryContextWindow * 0.5
++    ) {
++      concerns.push(
++        `context window (${fallbackEntry.contextWindow.toLocaleString()}) is less than half of primary (${primaryContextWindow.toLocaleString()})`,
++      );
++    }
++
++    // Primary supports reasoning but fallback doesn't
++    if (primaryReasoning && !fallbackEntry.reasoning) {
++      concerns.push("does not support reasoning (primary does)");
++    }
++
++    if (concerns.length > 0) {
++      warnings.push(
++        `- Fallback "${raw}": ${concerns.join("; ")}. ` +
++          "This model will receive the same tools as the primary model.",
++      );
++    }
++  }
++
++  if (warnings.length === 0) {
++    return;
++  }
++
++  const lines = [
++    "Fallback models with reduced capability will inherit the same tool access as the primary.",
++    "Models with smaller context windows or no reasoning support may handle tool calls less reliably.",
++    "",
++    ...warnings,
++    "",
++    `Review fallback config: ${formatCliCommand("openclaw config get agents.defaults.model")}`,
++  ];
++  note(lines.join("\n"), "Model failover safety");
++}
+diff --git a/src/commands/doctor-sandbox.ts b/src/commands/doctor-sandbox.ts
+index 90790e90737a..02d6dac19147 100644
+--- a/src/commands/doctor-sandbox.ts
++++ b/src/commands/doctor-sandbox.ts
+@@ -247,6 +247,55 @@ export async function maybeRepairSandboxImages(
+   return next;
+ }
+ 
++/**
++ * Check for sandbox fallthrough risk: sandbox mode is enabled but Docker
++ * may not be available, which causes silent fallthrough to host execution.
++ * Also validates the `requireAvailable` config flag.
++ */
++export async function noteSandboxFallthroughWarnings(cfg: OpenClawConfig) {
++  const sandbox = cfg.agents?.defaults?.sandbox;
++  const mode = sandbox?.mode ?? "off";
++  if (mode === "off") {
++    return;
++  }
++
++  const dockerAvailable = await isDockerAvailable();
++  const requireAvailable = sandbox?.requireAvailable === true;
++
++  if (!dockerAvailable) {
++    const lines = [
++      `Sandbox mode is "${mode}" but Docker is not available.`,
++      "Without Docker, sandbox-targeted commands will silently fall back to host execution.",
++      "This is a mental-model mismatch: you may expect isolation when none is present.",
++      "",
++      "Options:",
++      "- Install and start Docker",
++      "- Disable sandbox mode: openclaw config set agents.defaults.sandbox.mode off",
++    ];
++    if (requireAvailable) {
++      lines.push(
++        "",
++        "requireAvailable is enabled — the gateway will refuse to start until Docker is available.",
++      );
++    } else {
++      lines.push(
++        "",
++        "To fail-closed instead of falling through:",
++        "  openclaw config set agents.defaults.sandbox.requireAvailable true",
++      );
++    }
++    note(lines.join("\n"), "Sandbox safety");
++  } else if (!requireAvailable) {
++    // Docker is available now, but suggest opt-in for safety
++    const lines = [
++      `Sandbox mode is "${mode}" and Docker is currently available.`,
++      "Consider setting requireAvailable=true to prevent silent host fallthrough if Docker becomes unavailable.",
++      "  openclaw config set agents.defaults.sandbox.requireAvailable true",
++    ];
++    note(lines.join("\n"), "Sandbox safety");
++  }
++}
++
+ export function noteSandboxScopeWarnings(cfg: OpenClawConfig) {
+   const globalSandbox = cfg.agents?.defaults?.sandbox;
+   const agents = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
+diff --git a/src/commands/doctor.ts b/src/commands/doctor.ts
+index 0f5fb199f800..38d5f8f67fb9 100644
+--- a/src/commands/doctor.ts
++++ b/src/commands/doctor.ts
+@@ -36,6 +36,7 @@ import {
+ } from "./doctor-gateway-services.js";
+ import { noteSourceInstallIssues } from "./doctor-install.js";
+ import { noteMemorySearchHealth } from "./doctor-memory-search.js";
++import { noteModelFailoverSafetyWarnings } from "./doctor-model-failover.js";
+ import {
+   noteMacLaunchAgentOverrides,
+   noteMacLaunchctlGatewayEnvOverrides,
+@@ -43,7 +44,11 @@ import {
+   noteStartupOptimizationHints,
+ } from "./doctor-platform-notes.js";
+ import { createDoctorPrompter, type DoctorOptions } from "./doctor-prompter.js";
+-import { maybeRepairSandboxImages, noteSandboxScopeWarnings } from "./doctor-sandbox.js";
++import {
++  maybeRepairSandboxImages,
++  noteSandboxScopeWarnings,
++  noteSandboxFallthroughWarnings,
++} from "./doctor-sandbox.js";
+ import { noteSecurityWarnings } from "./doctor-security.js";
+ import { noteSessionLockHealth } from "./doctor-session-locks.js";
+ import { noteStateIntegrity, noteWorkspaceBackupTip } from "./doctor-state-integrity.js";
+@@ -194,6 +199,7 @@ export async function doctorCommand(
+ 
+   cfg = await maybeRepairSandboxImages(cfg, runtime, prompter);
+   noteSandboxScopeWarnings(cfg);
++  await noteSandboxFallthroughWarnings(cfg);
+ 
+   await maybeScanExtraGatewayServices(options, runtime, prompter);
+   await maybeRepairGatewayServiceConfig(cfg, resolveMode(cfg), runtime, prompter);
+@@ -201,6 +207,7 @@ export async function doctorCommand(
+   await noteMacLaunchctlGatewayEnvOverrides(cfg);
+ 
+   await noteSecurityWarnings(cfg);
++  await noteModelFailoverSafetyWarnings(cfg);
+   await noteOpenAIOAuthTlsPrerequisites({
+     cfg,
+     deep: options.deep === true,
+diff --git a/src/config/types.agents-shared.ts b/src/config/types.agents-shared.ts
+index 152c8973c114..f3d7d6b91938 100644
+--- a/src/config/types.agents-shared.ts
++++ b/src/config/types.agents-shared.ts
+@@ -28,6 +28,12 @@ export type AgentSandboxConfig = {
+   /** Legacy alias for scope ("session" when true, "shared" when false). */
+   perSession?: boolean;
+   workspaceRoot?: string;
++  /**
++   * When true, refuse to start the gateway if sandbox mode is enabled but
++   * the sandbox runtime (Docker) is unavailable. Prevents silent fallthrough
++   * to host execution. Default: false (warn only).
++   */
++  requireAvailable?: boolean;
+   /** Docker-specific sandbox settings. */
+   docker?: SandboxDockerSettings;
+   /** Optional sandboxed browser settings. */
+diff --git a/src/config/types.gateway.ts b/src/config/types.gateway.ts
+index 71d964f6c9e7..13a2c6ca7ff3 100644
+--- a/src/config/types.gateway.ts
++++ b/src/config/types.gateway.ts
+@@ -364,4 +364,11 @@ export type GatewayConfig = {
+    * Set to 0 to disable. Default: 5.
+    */
+   channelHealthCheckMinutes?: number;
++  /**
++   * Maximum number of entries allowed in a single command queue lane.
++   * When exceeded, the oldest queued entry is dropped to prevent unbounded
++   * memory growth. Set to 0 to disable the limit (not recommended).
++   * Default: 500.
++   */
++  maxCommandQueueSize?: number;
+ };
+diff --git a/src/config/types.openclaw.ts b/src/config/types.openclaw.ts
+index 0a8184195578..c257f14c49d2 100644
+--- a/src/config/types.openclaw.ts
++++ b/src/config/types.openclaw.ts
+@@ -112,6 +112,15 @@ export type OpenClawConfig = {
+   discovery?: DiscoveryConfig;
+   canvasHost?: CanvasHostConfig;
+   talk?: TalkConfig;
++  /** Voice input safety settings. */
++  voice?: {
++    /**
++     * When true, voice-originated inputs will include a system prompt hint
++     * instructing the model to ask for explicit confirmation before using
++     * dangerous tools (exec, fs write, message send). Default: false.
++     */
++    requireConfirmForDangerousTools?: boolean;
++  };
+   gateway?: GatewayConfig;
+   memory?: MemoryConfig;
+ };
+diff --git a/src/config/zod-schema.agent-runtime.ts b/src/config/zod-schema.agent-runtime.ts
+index eabd0567a85d..9081c2048af3 100644
+--- a/src/config/zod-schema.agent-runtime.ts
++++ b/src/config/zod-schema.agent-runtime.ts
+@@ -480,6 +480,7 @@ export const AgentSandboxSchema = z
+     scope: z.union([z.literal("session"), z.literal("agent"), z.literal("shared")]).optional(),
+     perSession: z.boolean().optional(),
+     workspaceRoot: z.string().optional(),
++    requireAvailable: z.boolean().optional(),
+     docker: SandboxDockerSchema,
+     browser: SandboxBrowserSchema,
+     prune: SandboxPruneSchema,
+diff --git a/src/config/zod-schema.ts b/src/config/zod-schema.ts
+index 600603cabd1b..ce87f1408143 100644
+--- a/src/config/zod-schema.ts
++++ b/src/config/zod-schema.ts
+@@ -584,6 +584,12 @@ export const OpenClawSchema = z
+       })
+       .strict()
+       .optional(),
++    voice: z
++      .object({
++        requireConfirmForDangerousTools: z.boolean().optional(),
++      })
++      .strict()
++      .optional(),
+     gateway: z
+       .object({
+         port: z.number().int().positive().optional(),
+@@ -653,6 +659,7 @@ export const OpenClawSchema = z
+           .strict()
+           .optional(),
+         channelHealthCheckMinutes: z.number().int().min(0).optional(),
++        maxCommandQueueSize: z.number().int().min(0).optional(),
+         tailscale: z
+           .object({
+             mode: z.union([z.literal("off"), z.literal("serve"), z.literal("funnel")]).optional(),
+diff --git a/src/gateway/server-startup-log.ts b/src/gateway/server-startup-log.ts
+index 594ac23badb1..12af0bb8a254 100644
+--- a/src/gateway/server-startup-log.ts
++++ b/src/gateway/server-startup-log.ts
+@@ -2,9 +2,39 @@ import chalk from "chalk";
+ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
+ import { resolveConfiguredModelRef } from "../agents/model-selection.js";
+ import type { loadConfig } from "../config/config.js";
++import { resolveAgentModelFallbackValues } from "../config/model-input.js";
+ import { getResolvedLoggerSettings } from "../logging.js";
+ import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
+ 
++/**
++ * Check whether sandbox mode is enabled but the sandbox runtime (Docker) may
++ * not be available, which would cause silent fallthrough to host execution.
++ * Returns a warning string if the config is risky, or null if everything is fine.
++ */
++export function checkSandboxFallthroughRisk(cfg: ReturnType<typeof loadConfig>): {
++  warning: string | null;
++  requireAvailable: boolean;
++  mode: string;
++} {
++  const sandbox = cfg.agents?.defaults?.sandbox;
++  const mode = sandbox?.mode ?? "off";
++  const requireAvailable = sandbox?.requireAvailable === true;
++  if (mode === "off") {
++    return { warning: null, requireAvailable, mode };
++  }
++  // When sandbox mode is enabled, warn if Docker availability cannot be confirmed
++  // at startup. The actual Docker check is deferred (it's async), but we flag
++  // the configuration risk so operators are aware of the fallthrough behavior.
++  const warning =
++    `sandbox mode "${mode}" is enabled but Docker availability is not guaranteed at startup. ` +
++    "If Docker is unavailable, commands may silently execute on the host. " +
++    "Set agents.defaults.sandbox.requireAvailable=true to fail-closed instead." +
++    (requireAvailable
++      ? " (requireAvailable is enabled — gateway will refuse to start if Docker is unavailable)"
++      : "");
++  return { warning, requireAvailable, mode };
++}
++
+ export function logGatewayStartup(params: {
+   cfg: ReturnType<typeof loadConfig>;
+   bindHost: string;
+@@ -41,4 +71,32 @@ export function logGatewayStartup(params: {
+       "Run `openclaw security audit`.";
+     params.log.warn(warning);
+   }
++
++  // Warn about model failover safety at startup
++  const fallbacks = resolveAgentModelFallbackValues(params.cfg.agents?.defaults?.model);
++  const execSecurity = params.cfg.tools?.exec?.security ?? "allowlist";
++  if (fallbacks.length > 0 && execSecurity !== "deny") {
++    params.log.info(
++      `model failover: ${fallbacks.length} fallback model(s) configured. ` +
++        "Fallback models inherit the same tool access as the primary. " +
++        "Run `openclaw doctor` to check for capability mismatches.",
++    );
++  }
++
++  // Warn about sandbox fallthrough risk at startup
++  const sandboxCheck = checkSandboxFallthroughRisk(params.cfg);
++  if (sandboxCheck.warning) {
++    params.log.warn(`sandbox safety: ${sandboxCheck.warning}`);
++  }
++
++  // Log command queue bounding status
++  const configuredQueueSize = params.cfg.gateway?.maxCommandQueueSize;
++  if (typeof configuredQueueSize === "number" && configuredQueueSize > 0) {
++    params.log.info(`command queue: bounded to ${configuredQueueSize} entries per lane`);
++  } else if (configuredQueueSize === 0) {
++    params.log.warn(
++      "command queue: unbounded (gateway.maxCommandQueueSize=0). " +
++        "Sustained high-rate input may cause memory growth.",
++    );
++  }
+ }
+diff --git a/src/gateway/server.impl.ts b/src/gateway/server.impl.ts
+index d714ea61eebe..351b9903d189 100644
+--- a/src/gateway/server.impl.ts
++++ b/src/gateway/server.impl.ts
+@@ -48,7 +48,7 @@ import { getGlobalHookRunner, runGlobalGatewayStopSafely } from "../plugins/hook
+ import { createEmptyPluginRegistry } from "../plugins/registry.js";
+ import { createPluginRuntime } from "../plugins/runtime/index.js";
+ import type { PluginServicesHandle } from "../plugins/services.js";
+-import { getTotalQueueSize } from "../process/command-queue.js";
++import { getTotalQueueSize, setMaxCommandQueueSize } from "../process/command-queue.js";
+ import type { RuntimeEnv } from "../runtime.js";
+ import type { CommandSecretAssignment } from "../secrets/command-config.js";
+ import {
+@@ -94,7 +94,7 @@ import { createGatewayReloadHandlers } from "./server-reload-handlers.js";
+ import { resolveGatewayRuntimeConfig } from "./server-runtime-config.js";
+ import { createGatewayRuntimeState } from "./server-runtime-state.js";
+ import { resolveSessionKeyForRun } from "./server-session-key.js";
+-import { logGatewayStartup } from "./server-startup-log.js";
++import { checkSandboxFallthroughRisk, logGatewayStartup } from "./server-startup-log.js";
+ import { startGatewaySidecars } from "./server-startup.js";
+ import { startGatewayTailscaleExposure } from "./server-tailscale.js";
+ import { createWizardSessionTracker } from "./server-wizard-sessions.js";
+@@ -404,6 +404,32 @@ export async function startGatewayServer(
+       activate: true,
+     })
+   ).config;
++
++  // Enforce sandbox.requireAvailable: if sandbox mode is enabled and
++  // requireAvailable=true, check Docker availability and refuse to start
++  // if Docker is not reachable. This prevents silent fallthrough to host execution.
++  const sandboxFallthrough = checkSandboxFallthroughRisk(cfgAtStart);
++  if (sandboxFallthrough.requireAvailable && sandboxFallthrough.mode !== "off") {
++    const { runExec } = await import("../process/exec.js");
++    let dockerOk = false;
++    try {
++      await runExec("docker", ["version", "--format", "{{.Server.Version}}"], {
++        timeoutMs: 5_000,
++      });
++      dockerOk = true;
++    } catch {
++      dockerOk = false;
++    }
++    if (!dockerOk) {
++      const msg =
++        `sandbox.requireAvailable is true and sandbox mode is "${sandboxFallthrough.mode}", ` +
++        "but Docker is not available. Refusing to start to prevent silent host execution fallthrough. " +
++        "Install Docker or set agents.defaults.sandbox.requireAvailable=false to allow startup with warnings.";
++      log.error(msg);
++      throw new Error(msg);
++    }
++  }
++
+   const diagnosticsEnabled = isDiagnosticsEnabled(cfgAtStart);
+   if (diagnosticsEnabled) {
+     startDiagnosticHeartbeat();
+@@ -580,6 +606,12 @@ export async function startGatewayServer(
+   const hasMobileNodeConnected = () => hasConnectedMobileNode(nodeRegistry);
+   applyGatewayLaneConcurrency(cfgAtStart);
+ 
++  // Apply command queue size limit from config (default: 500)
++  const configuredQueueSize = cfgAtStart.gateway?.maxCommandQueueSize;
++  if (typeof configuredQueueSize === "number" && configuredQueueSize >= 0) {
++    setMaxCommandQueueSize(configuredQueueSize);
++  }
++
+   let cronState = buildGatewayCronService({
+     cfg: cfgAtStart,
+     deps,
+diff --git a/src/process/command-queue.ts b/src/process/command-queue.ts
+index 7b4a386bdadb..49a9cb750408 100644
+--- a/src/process/command-queue.ts
++++ b/src/process/command-queue.ts
+@@ -23,9 +23,32 @@ export class GatewayDrainingError extends Error {
+   }
+ }
+ 
++/**
++ * Dedicated error type thrown when a new command is rejected because the
++ * queue has reached its maximum size limit.
++ */
++export class CommandQueueOverflowError extends Error {
++  constructor(lane: string, size: number, maxSize: number) {
++    super(
++      `Command queue overflow: lane "${lane}" has ${size} entries (max: ${maxSize}). ` +
++        "Oldest entry was dropped to make room.",
++    );
++    this.name = "CommandQueueOverflowError";
++  }
++}
++
+ // Set while gateway is draining for restart; new enqueues are rejected.
+ let gatewayDraining = false;
+ 
++/**
++ * Maximum number of entries allowed in a single lane's queue.
++ * When exceeded, the oldest queued entry is dropped and rejected with
++ * `CommandLaneClearedError`. Set via `setMaxCommandQueueSize()`.
++ * Default: 500 (generous enough for bursty workloads, bounded enough
++ * to prevent unbounded memory growth).
++ */
++let maxCommandQueueSize = 500;
++
+ // Minimal in-process queue to serialize command executions.
+ // Default lane ("main") preserves the existing behavior. Additional lanes allow
+ // low-risk parallelism (e.g. cron jobs) without interleaving stdin / logs for
+@@ -151,6 +174,25 @@ export function markGatewayDraining(): void {
+   gatewayDraining = true;
+ }
+ 
++/**
++ * Set the maximum number of entries a single lane's queue may hold.
++ * When a new enqueue would exceed this limit, the oldest queued entry
++ * is dropped (rejected with `CommandLaneClearedError`) and a diagnostic
++ * warning is emitted.
++ *
++ * Pass 0 or negative to disable the limit (unbounded, legacy behavior).
++ */
++export function setMaxCommandQueueSize(size: number): void {
++  maxCommandQueueSize = size > 0 ? Math.floor(size) : 0;
++}
++
++/**
++ * Returns the current max queue size setting. 0 means unbounded.
++ */
++export function getMaxCommandQueueSize(): number {
++  return maxCommandQueueSize;
++}
++
+ export function setCommandLaneConcurrency(lane: string, maxConcurrent: number) {
+   const cleaned = lane.trim() || CommandLane.Main;
+   const state = getLaneState(cleaned);
+@@ -172,6 +214,21 @@ export function enqueueCommandInLane<T>(
+   const cleaned = lane.trim() || CommandLane.Main;
+   const warnAfterMs = opts?.warnAfterMs ?? 2_000;
+   const state = getLaneState(cleaned);
++
++  // Enforce queue size limit: drop oldest entry when at capacity.
++  // This prevents unbounded memory growth from sustained high-rate input.
++  if (maxCommandQueueSize > 0 && state.queue.length >= maxCommandQueueSize) {
++    const dropped = state.queue.shift();
++    if (dropped) {
++      diag.warn(
++        `command queue overflow: lane=${cleaned} size=${state.queue.length + 1} max=${maxCommandQueueSize} — dropping oldest entry`,
++      );
++      dropped.reject(
++        new CommandLaneClearedError(`${cleaned} (queue overflow: max ${maxCommandQueueSize})`),
++      );
++    }
++  }
++
+   return new Promise<T>((resolve, reject) => {
+     state.queue.push({
+       task: () => task(),

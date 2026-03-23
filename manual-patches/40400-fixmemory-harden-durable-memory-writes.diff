@@ -1,0 +1,1414 @@
+diff --git a/.secrets.baseline b/.secrets.baseline
+index 2f794ecc01bd..28446b56f179 100644
+--- a/.secrets.baseline
++++ b/.secrets.baseline
+@@ -9720,7 +9720,7 @@
+         "filename": "docs/concepts/memory.md",
+         "hashed_secret": "b9f640d6095b9f6b5a65983f7b76dbbb254e0044",
+         "is_verified": false,
+-        "line_number": 726
++        "line_number": 730
+       }
+     ],
+     "docs/concepts/model-providers.md": [
+@@ -13035,5 +13035,5 @@
+       }
+     ]
+   },
+-  "generated_at": "2026-03-08T20:41:38Z"
++  "generated_at": "2026-03-09T00:39:25Z"
+ }
+diff --git a/docs/concepts/memory.md b/docs/concepts/memory.md
+index b39409452497..d1141866b574 100644
+--- a/docs/concepts/memory.md
++++ b/docs/concepts/memory.md
+@@ -376,6 +376,8 @@ Tools:
+ 
+ - `memory_search` — returns snippets with file + line ranges.
+ - `memory_get` — read memory file content by path.
++- `memory_write` — append a durable memory line to daily (`memory/YYYY-MM-DD.md`) or long-term (`MEMORY.md`) memory.
++- `memory_upsert` — keyed update/insert for durable memory entries to avoid duplicates.
+ 
+ Local mode:
+ 
+@@ -387,7 +389,9 @@ Local mode:
+ 
+ - `memory_search` semantically searches Markdown chunks (~400 token target, 80-token overlap) from `MEMORY.md` + `memory/**/*.md`. It returns snippet text (capped ~700 chars), file path, line range, score, provider/model, and whether we fell back from local → remote embeddings. No full file payload is returned.
+ - `memory_get` reads a specific memory Markdown file (workspace-relative), optionally from a starting line and for N lines. Paths outside `MEMORY.md` / `memory/` are rejected.
+-- Both tools are enabled only when `memorySearch.enabled` resolves true for the agent.
++- `memory_write` appends one normalized Markdown bullet to daily or long-term memory files.
++- `memory_upsert` writes a keyed bullet (`[key:<id>]`) and updates existing entries that share the same key.
++- Search tools require `memorySearch.enabled`; write tools require memory plugin availability and a writable workspace.
+ 
+ ### What gets indexed (and when)
+ 
+diff --git a/extensions/memory-core/index.ts b/extensions/memory-core/index.ts
+index 6559485e46a1..93b24405df48 100644
+--- a/extensions/memory-core/index.ts
++++ b/extensions/memory-core/index.ts
+@@ -26,6 +26,24 @@ const memoryCorePlugin = {
+       { names: ["memory_search", "memory_get"] },
+     );
+ 
++    api.registerTool(
++      (ctx) => {
++        const memoryWriteTool = api.runtime.tools.createMemoryWriteTool({
++          config: ctx.config,
++          agentSessionKey: ctx.sessionKey,
++        });
++        const memoryUpsertTool = api.runtime.tools.createMemoryUpsertTool({
++          config: ctx.config,
++          agentSessionKey: ctx.sessionKey,
++        });
++        if (!memoryWriteTool || !memoryUpsertTool) {
++          return null;
++        }
++        return [memoryWriteTool, memoryUpsertTool];
++      },
++      { names: ["memory_write", "memory_upsert"] },
++    );
++
+     api.registerCli(
+       ({ program }) => {
+         api.runtime.tools.registerMemoryCli(program);
+diff --git a/extensions/test-utils/plugin-runtime-mock.ts b/extensions/test-utils/plugin-runtime-mock.ts
+index 8c599599a312..6f2165f4f5e6 100644
+--- a/extensions/test-utils/plugin-runtime-mock.ts
++++ b/extensions/test-utils/plugin-runtime-mock.ts
+@@ -66,6 +66,9 @@ export function createPluginRuntimeMock(overrides: DeepPartial<PluginRuntime> =
+       createMemoryGetTool: vi.fn() as unknown as PluginRuntime["tools"]["createMemoryGetTool"],
+       createMemorySearchTool:
+         vi.fn() as unknown as PluginRuntime["tools"]["createMemorySearchTool"],
++      createMemoryWriteTool: vi.fn() as unknown as PluginRuntime["tools"]["createMemoryWriteTool"],
++      createMemoryUpsertTool:
++        vi.fn() as unknown as PluginRuntime["tools"]["createMemoryUpsertTool"],
+       registerMemoryCli: vi.fn() as unknown as PluginRuntime["tools"]["registerMemoryCli"],
+     },
+     channel: {
+diff --git a/src/agents/tools/memory-tool.test.ts b/src/agents/tools/memory-tool.test.ts
+index de907c016326..583b921fa05f 100644
+--- a/src/agents/tools/memory-tool.test.ts
++++ b/src/agents/tools/memory-tool.test.ts
+@@ -1,9 +1,48 @@
+-import { beforeEach, describe, expect, it } from "vitest";
++import fs from "node:fs/promises";
++import os from "node:os";
++import path from "node:path";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import {
+   resetMemoryToolMockState,
++  setMemoryReadFileImpl,
+   setMemorySearchImpl,
+ } from "../../../test/helpers/memory-tool-manager-mock.js";
+-import { createMemorySearchTool } from "./memory-tool.js";
++import type { OpenClawConfig } from "../../config/config.js";
++import { ToolInputError } from "./common.js";
++import {
++  createMemoryGetTool,
++  createMemorySearchTool,
++  createMemoryUpsertTool,
++  createMemoryWriteTool,
++} from "./memory-tool.js";
++
++function asOpenClawConfig(config: Partial<OpenClawConfig>): OpenClawConfig {
++  return config as OpenClawConfig;
++}
++
++function createToolConfig() {
++  return asOpenClawConfig({ agents: { list: [{ id: "main", default: true }] } });
++}
++
++function createMemoryGetToolOrThrow(config: OpenClawConfig = createToolConfig()) {
++  const tool = createMemoryGetTool({ config });
++  if (!tool) {
++    throw new Error("tool missing");
++  }
++  return tool;
++}
++
++function configWithWorkspace(workspace: string): OpenClawConfig {
++  return {
++    agents: {
++      defaults: {
++        workspace,
++        memorySearch: { enabled: true },
++      },
++      list: [{ id: "main", default: true }],
++    },
++  } as unknown as OpenClawConfig;
++}
+ 
+ describe("memory_search unavailable payloads", () => {
+   beforeEach(() => {
+@@ -56,3 +95,606 @@ describe("memory_search unavailable payloads", () => {
+     });
+   });
+ });
++
++describe("memory tools", () => {
++  it("does not throw when memory_get fails", async () => {
++    setMemoryReadFileImpl(async () => {
++      throw new Error("path required");
++    });
++
++    const tool = createMemoryGetToolOrThrow();
++
++    const result = await tool.execute("call_2", { path: "memory/NOPE.md" });
++    expect(result.details).toEqual({
++      path: "memory/NOPE.md",
++      text: "",
++      disabled: true,
++      error: "path required",
++    });
++  });
++});
++
++describe("memory write tools", () => {
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
++  it("memory_write appends to daily memory file", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const result = await tool.execute("call_write", {
++      text: "remember this",
++      date: "2026-02-18",
++      kind: "preference",
++    });
++    const details = result.details as { path: string; target: string };
++    expect(details.path).toBe("memory/2026-02-18.md");
++    expect(details.target).toBe("daily");
++
++    const content = await fs.readFile(path.join(workspace, "memory", "2026-02-18.md"), "utf-8");
++    expect(content).toContain("remember this");
++    expect(content).toContain("kind:preference");
++  });
++
++  it("memory_write inserts a separator when the file lacks a trailing newline", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-separator-"));
++    await fs.mkdir(path.join(workspace, "memory"), { recursive: true });
++    await fs.writeFile(
++      path.join(workspace, "memory", "2026-02-18.md"),
++      "- existing entry without newline",
++      "utf-8",
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_write_separator", {
++      text: "remember this",
++      date: "2026-02-18",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "memory", "2026-02-18.md"), "utf-8");
++    expect(content).toBe("- existing entry without newline\n- remember this\n");
++  });
++
++  it("memory_upsert updates existing keyed entries", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_1", {
++      key: "favorite-food",
++      text: "pizza",
++      target: "longterm",
++    });
++    await tool.execute("call_upsert_2", {
++      key: "favorite-food",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toContain("[key:favorite-food]");
++    expect(content).toContain("sushi");
++    expect(content).not.toContain("pizza");
++    expect(content.match(/\[key:favorite-food\]/g)?.length).toBe(1);
++  });
++
++  it("memory_upsert collapses duplicate keyed entries down to one line", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-dedupe-"));
++    await fs.writeFile(
++      path.join(workspace, "MEMORY.md"),
++      "- [key:favorite-food] pizza\n- [key:favorite-food] tacos\n",
++      "utf-8",
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_dedupe", {
++      key: "favorite-food",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe("- [key:favorite-food] sushi\n");
++  });
++
++  it("memory_upsert removes legacy multiline keyed blocks before rewriting", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-multiline-"));
++    await fs.writeFile(
++      path.join(workspace, "MEMORY.md"),
++      "- [key:favorite-food] pizza\n  with extra context\n- [key:other] tacos\n",
++      "utf-8",
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_multiline", {
++      key: "favorite-food",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe("- [key:favorite-food] sushi\n- [key:other] tacos\n");
++  });
++
++  it("memory_upsert removes multiline keyed blocks with blank-line continuations", async () => {
++    const workspace = await fs.mkdtemp(
++      path.join(os.tmpdir(), "openclaw-memory-upsert-blank-continuation-"),
++    );
++    await fs.writeFile(
++      path.join(workspace, "MEMORY.md"),
++      "- [key:favorite-food] pizza\n\n  with extra context\n- [key:other] tacos\n",
++      "utf-8",
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_blank_continuation", {
++      key: "favorite-food",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe("- [key:favorite-food] sushi\n- [key:other] tacos\n");
++  });
++
++  it("memory_upsert preserves unrelated top-level markdown blocks", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-blocks-"));
++    await fs.writeFile(
++      path.join(workspace, "MEMORY.md"),
++      [
++        "- [key:favorite-food] pizza",
++        "## preferences",
++        "* spicy",
++        "plain note",
++        "- [key:other] tacos",
++      ].join("\n") + "\n",
++      "utf-8",
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_blocks", {
++      key: "favorite-food",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe(
++      [
++        "- [key:favorite-food] sushi",
++        "## preferences",
++        "* spicy",
++        "plain note",
++        "- [key:other] tacos",
++        "",
++      ].join("\n"),
++    );
++  });
++
++  it("memory_upsert preserves all concurrent keyed writes to the same file", async () => {
++    const workspace = await fs.mkdtemp(
++      path.join(os.tmpdir(), "openclaw-memory-upsert-concurrent-"),
++    );
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const count = 20;
++    await Promise.all(
++      Array.from({ length: count }, (_, index) =>
++        tool.execute(`call_upsert_concurrent_${index}`, {
++          key: `pref-${index}`,
++          text: `value-${index}`,
++          target: "longterm",
++        }),
++      ),
++    );
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    for (let index = 0; index < count; index += 1) {
++      expect(content).toContain(`[key:pref-${index}]`);
++      expect(content).toContain(`value-${index}`);
++    }
++  });
++
++  it("memory_upsert propagates non-missing read errors without rewriting", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-readerr-"));
++    const memoryPath = path.join(workspace, "MEMORY.md");
++    await fs.writeFile(memoryPath, "- [key:favorite-food] pizza\n- [key:other] tacos\n", "utf-8");
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const originalReadFile = fs.readFile.bind(fs);
++    const readFileSpy = vi.spyOn(fs, "readFile");
++    readFileSpy.mockImplementationOnce(async (target, options) => {
++      if (target === memoryPath && options === "utf-8") {
++        const error = new Error("permission denied") as NodeJS.ErrnoException;
++        error.code = "EACCES";
++        throw error;
++      }
++      // oxlint-disable-next-line typescript/no-explicit-any
++      return originalReadFile(target as any, options as any);
++    });
++
++    await expect(
++      tool.execute("call_upsert_readerr", {
++        key: "favorite-food",
++        text: "sushi",
++        target: "longterm",
++      }),
++    ).rejects.toMatchObject({ message: "permission denied" });
++
++    readFileSpy.mockRestore();
++    const content = await fs.readFile(memoryPath, "utf-8");
++    expect(content).toBe("- [key:favorite-food] pizza\n- [key:other] tacos\n");
++  });
++
++  it("memory_write normalizes metadata into a single delimiter-safe line", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-meta-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_write_meta", {
++      text: "remember this",
++      date: "2026-02-18",
++      kind: "preference,\nprimary",
++      source: "user)\n- [key:evil] injected",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "memory", "2026-02-18.md"), "utf-8");
++    expect(content.split(/\r?\n/).filter(Boolean)).toHaveLength(1);
++    expect(content).toContain("kind:preference primary");
++    expect(content).toContain("source:user - key:evil injected");
++    expect(content).not.toContain("[key:evil]");
++  });
++
++  it("memory_upsert does not allow metadata to inject extra keyed entries", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-meta-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_upsert_meta", {
++      key: "favorite-food",
++      text: "pizza",
++      target: "longterm",
++      source: "user)\n- [key:evil] injected",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content.split(/\r?\n/).filter(Boolean)).toHaveLength(1);
++    expect(content).toContain("[key:favorite-food]");
++    expect(content).not.toContain("\n- [key:evil]");
++  });
++
++  it("memory_write escapes a leading key marker in freeform text", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-text-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await tool.execute("call_write_text_marker", {
++      text: "[key:favorite-food] do not treat this as an upsert entry",
++      target: "longterm",
++    });
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe("- \\[key:favorite-food] do not treat this as an upsert entry\n");
++  });
++
++  it("memory_write reuses legacy memory.md for longterm writes", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-legacy-root-"));
++    await fs.writeFile(path.join(workspace, "memory.md"), "- existing note\n", "utf-8");
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const result = await tool.execute("call_write_legacy_root", {
++      text: "remember this too",
++      target: "longterm",
++    });
++
++    expect(result.details).toMatchObject({ path: "memory.md", target: "longterm" });
++    const legacyContent = await fs.readFile(path.join(workspace, "memory.md"), "utf-8");
++    expect(legacyContent).toContain("existing note");
++    expect(legacyContent).toContain("remember this too");
++    await expect(fs.access(path.join(workspace, "MEMORY.md"))).rejects.toThrow();
++  });
++
++  it("rejects symlinked longterm memory targets", async () => {
++    if (process.platform === "win32") {
++      return;
++    }
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-symlink-"));
++    const externalPath = path.join(os.tmpdir(), `openclaw-memory-external-${Date.now()}.md`);
++    await fs.writeFile(externalPath, "- external note\n", "utf-8");
++    await fs.symlink(externalPath, path.join(workspace, "MEMORY.md"));
++
++    const cfg = configWithWorkspace(workspace);
++    const writeTool = createMemoryWriteTool({ config: cfg });
++    const upsertTool = createMemoryUpsertTool({ config: cfg });
++    expect(writeTool).not.toBeNull();
++    expect(upsertTool).not.toBeNull();
++    if (!writeTool || !upsertTool) {
++      throw new Error("tool missing");
++    }
++
++    await expect(
++      writeTool.execute("call_write_symlink", {
++        text: "remember this",
++        target: "longterm",
++      }),
++    ).rejects.toMatchObject({
++      name: "ToolInputError",
++      message: "memory path cannot use symlinks",
++    } satisfies Partial<ToolInputError>);
++
++    await expect(
++      upsertTool.execute("call_upsert_symlink", {
++        key: "favorite-food",
++        text: "sushi",
++        target: "longterm",
++      }),
++    ).rejects.toMatchObject({
++      name: "ToolInputError",
++      message: "memory path cannot use symlinks",
++    } satisfies Partial<ToolInputError>);
++
++    expect(await fs.readFile(externalPath, "utf-8")).toBe("- external note\n");
++  });
++
++  it("does not fall back to legacy memory.md on non-missing MEMORY.md stat errors", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-primary-stat-"));
++    const legacyPath = path.join(workspace, "memory.md");
++    const primaryPath = path.join(workspace, "MEMORY.md");
++    await fs.writeFile(legacyPath, "- legacy note\n", "utf-8");
++
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const originalLstat = fs.lstat.bind(fs);
++    const lstatSpy = vi.spyOn(fs, "lstat");
++    lstatSpy.mockImplementation(async (target) => {
++      if (target === primaryPath) {
++        const error = new Error("permission denied") as NodeJS.ErrnoException;
++        error.code = "EACCES";
++        throw error;
++      }
++      // oxlint-disable-next-line typescript/no-explicit-any
++      return originalLstat(target as any);
++    });
++
++    await expect(
++      tool.execute("call_write_primary_stat_error", {
++        text: "remember this",
++        target: "longterm",
++      }),
++    ).rejects.toMatchObject({ message: "permission denied" });
++
++    lstatSpy.mockRestore();
++    expect(await fs.readFile(legacyPath, "utf-8")).toBe("- legacy note\n");
++    await expect(fs.access(primaryPath)).rejects.toThrow();
++  });
++
++  it("memory_write surfaces invalid target/date as ToolInputError", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-invalid-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await expect(
++      tool.execute("call_write_invalid_target", {
++        text: "remember this",
++        target: "weekly",
++      }),
++    ).rejects.toMatchObject({
++      name: "ToolInputError",
++      message: 'target must be "daily" or "longterm"',
++    } satisfies Partial<ToolInputError>);
++
++    await expect(
++      tool.execute("call_write_invalid_date", {
++        text: "remember this",
++        target: "daily",
++        date: "03-08-2026",
++      }),
++    ).rejects.toMatchObject({
++      name: "ToolInputError",
++      message: "date must be YYYY-MM-DD",
++    } satisfies Partial<ToolInputError>);
++  });
++
++  it("memory_upsert surfaces invalid normalized keys as ToolInputError", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-invalid-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    await expect(
++      tool.execute("call_upsert_invalid_key", {
++        key: "!!!",
++        text: "remember this",
++      }),
++    ).rejects.toMatchObject({
++      name: "ToolInputError",
++      message: "key is required",
++    } satisfies Partial<ToolInputError>);
++  });
++
++  it("memory_upsert trims surrounding whitespace before normalizing keys", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-upsert-keytrim-"));
++    const cfg = configWithWorkspace(workspace);
++    const tool = createMemoryUpsertTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const result = await tool.execute("call_upsert_trimmed_key", {
++      key: "  favorite food  ",
++      text: "sushi",
++      target: "longterm",
++    });
++
++    expect(result.details).toMatchObject({ key: "favorite-food" });
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toBe("- [key:favorite-food] sushi\n");
++  });
++
++  it("surfaces blank memory text as ToolInputError", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-blank-text-"));
++    const cfg = configWithWorkspace(workspace);
++    const writeTool = createMemoryWriteTool({ config: cfg });
++    const upsertTool = createMemoryUpsertTool({ config: cfg });
++    expect(writeTool).not.toBeNull();
++    expect(upsertTool).not.toBeNull();
++    if (!writeTool || !upsertTool) {
++      throw new Error("tool missing");
++    }
++
++    await expect(
++      writeTool.execute("call_write_blank_text", {
++        text: "  \n  ",
++      }),
++    ).rejects.toBeInstanceOf(ToolInputError);
++
++    await expect(
++      upsertTool.execute("call_upsert_blank_text", {
++        key: "favorite-food",
++        text: "  \n  ",
++      }),
++    ).rejects.toBeInstanceOf(ToolInputError);
++  });
++
++  it("memory_write defaults daily dates using configured user timezone", async () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(new Date("2026-02-19T02:30:00Z"));
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-write-tz-"));
++    const cfg = asOpenClawConfig({
++      agents: {
++        defaults: {
++          workspace,
++          userTimezone: "America/New_York",
++          memorySearch: { enabled: true },
++        },
++        list: [{ id: "main", default: true }],
++      },
++    });
++    const tool = createMemoryWriteTool({ config: cfg });
++    expect(tool).not.toBeNull();
++    if (!tool) {
++      throw new Error("tool missing");
++    }
++
++    const result = await tool.execute("call_write_default_date", {
++      text: "remember this",
++      target: "daily",
++    });
++
++    expect(result.details).toMatchObject({
++      path: "memory/2026-02-18.md",
++      date: "2026-02-18",
++    });
++    const content = await fs.readFile(path.join(workspace, "memory", "2026-02-18.md"), "utf-8");
++    expect(content).toContain("remember this");
++  });
++
++  it("ignores incidental date values for longterm memory writes and upserts", async () => {
++    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-longterm-date-"));
++    const cfg = configWithWorkspace(workspace);
++    const writeTool = createMemoryWriteTool({ config: cfg });
++    const upsertTool = createMemoryUpsertTool({ config: cfg });
++    expect(writeTool).not.toBeNull();
++    expect(upsertTool).not.toBeNull();
++    if (!writeTool || !upsertTool) {
++      throw new Error("tool missing");
++    }
++
++    await expect(
++      writeTool.execute("call_write_longterm_date", {
++        text: "remember this",
++        target: "longterm",
++        date: "next week",
++      }),
++    ).resolves.toBeDefined();
++
++    await expect(
++      upsertTool.execute("call_upsert_longterm_date", {
++        key: "favorite-food",
++        text: "sushi",
++        target: "longterm",
++        date: "next week",
++      }),
++    ).resolves.toBeDefined();
++
++    const content = await fs.readFile(path.join(workspace, "MEMORY.md"), "utf-8");
++    expect(content).toContain("remember this");
++    expect(content).toContain("[key:favorite-food]");
++    expect(content).toContain("sushi");
++  });
++});
+diff --git a/src/agents/tools/memory-tool.ts b/src/agents/tools/memory-tool.ts
+index c0d595b21a27..2c9dfeade748 100644
+--- a/src/agents/tools/memory-tool.ts
++++ b/src/agents/tools/memory-tool.ts
+@@ -1,3 +1,5 @@
++import fs from "node:fs/promises";
++import path from "node:path";
+ import { Type } from "@sinclair/typebox";
+ import type { OpenClawConfig } from "../../config/config.js";
+ import type { MemoryCitationsMode } from "../../config/types.memory.js";
+@@ -5,10 +7,12 @@ import { resolveMemoryBackendConfig } from "../../memory/backend-config.js";
+ import { getMemorySearchManager } from "../../memory/index.js";
+ import type { MemorySearchResult } from "../../memory/types.js";
+ import { parseAgentSessionKey } from "../../routing/session-key.js";
+-import { resolveSessionAgentId } from "../agent-scope.js";
++import { resolveAgentWorkspaceDir, resolveSessionAgentId } from "../agent-scope.js";
++import { resolveUserTimezone } from "../date-time.js";
+ import { resolveMemorySearchConfig } from "../memory-search.js";
++import { optionalStringEnum } from "../schema/typebox.js";
+ import type { AnyAgentTool } from "./common.js";
+-import { jsonResult, readNumberParam, readStringParam } from "./common.js";
++import { ToolInputError, jsonResult, readNumberParam, readStringParam } from "./common.js";
+ 
+ const MemorySearchSchema = Type.Object({
+   query: Type.String(),
+@@ -22,6 +26,47 @@ const MemoryGetSchema = Type.Object({
+   lines: Type.Optional(Type.Number()),
+ });
+ 
++const MemoryWriteSchema = Type.Object({
++  text: Type.String(),
++  target: optionalStringEnum(["daily", "longterm"]),
++  date: Type.Optional(Type.String()),
++  kind: Type.Optional(Type.String()),
++  source: Type.Optional(Type.String()),
++  confidence: Type.Optional(Type.Number()),
++});
++
++const MemoryUpsertSchema = Type.Object({
++  key: Type.String(),
++  text: Type.String(),
++  target: optionalStringEnum(["daily", "longterm"]),
++  date: Type.Optional(Type.String()),
++  kind: Type.Optional(Type.String()),
++  source: Type.Optional(Type.String()),
++  confidence: Type.Optional(Type.Number()),
++});
++
++const memoryFileLocks = new Map<string, Promise<void>>();
++
++async function withMemoryFileLock<T>(absPath: string, action: () => Promise<T>): Promise<T> {
++  const lockKey = path.resolve(absPath);
++  const previous = memoryFileLocks.get(lockKey) ?? Promise.resolve();
++  let releaseCurrent: (() => void) | undefined;
++  const current = new Promise<void>((resolve) => {
++    releaseCurrent = resolve;
++  });
++  const queued = previous.then(() => current);
++  memoryFileLocks.set(lockKey, queued);
++  try {
++    await previous;
++    return await action();
++  } finally {
++    releaseCurrent?.();
++    if (memoryFileLocks.get(lockKey) === queued) {
++      memoryFileLocks.delete(lockKey);
++    }
++  }
++}
++
+ function resolveMemoryToolContext(options: { config?: OpenClawConfig; agentSessionKey?: string }) {
+   const cfg = options.config;
+   if (!cfg) {
+@@ -37,6 +82,25 @@ function resolveMemoryToolContext(options: { config?: OpenClawConfig; agentSessi
+   return { cfg, agentId };
+ }
+ 
++function resolveMemoryWriteToolContext(options: {
++  config?: OpenClawConfig;
++  agentSessionKey?: string;
++}) {
++  const cfg = options.config;
++  if (!cfg) {
++    return null;
++  }
++  const agentId = resolveSessionAgentId({
++    sessionKey: options.agentSessionKey,
++    config: cfg,
++  });
++  return {
++    cfg,
++    agentId,
++    workspaceDir: resolveAgentWorkspaceDir(cfg, agentId),
++  };
++}
++
+ export function createMemorySearchTool(options: {
+   config?: OpenClawConfig;
+   agentSessionKey?: string;
+@@ -139,6 +203,389 @@ export function createMemoryGetTool(options: {
+   };
+ }
+ 
++export function createMemoryWriteTool(options: {
++  config?: OpenClawConfig;
++  agentSessionKey?: string;
++}): AnyAgentTool | null {
++  const ctx = resolveMemoryWriteToolContext(options);
++  if (!ctx) {
++    return null;
++  }
++  return {
++    label: "Memory Write",
++    name: "memory_write",
++    description:
++      "Append a durable note to MEMORY.md or memory/YYYY-MM-DD.md. Use when the user says to remember something.",
++    parameters: MemoryWriteSchema,
++    execute: async (_toolCallId, params) => {
++      const text = normalizeMemoryText(readStringParam(params, "text", { required: true }));
++      if (!text) {
++        throw new ToolInputError("text is required");
++      }
++      const target = readMemoryTarget(params, "target", "daily");
++      const requestedDate = readStringParam(params, "date");
++      const date = resolveMemoryWriteDate(ctx.cfg, target, requestedDate);
++      const entry = formatMemoryEntry({
++        text,
++        kind: readStringParam(params, "kind"),
++        source: readStringParam(params, "source"),
++        confidence: readNumberParam(params, "confidence"),
++      });
++      const absPath = await resolveMemoryWritePath({
++        workspaceDir: ctx.workspaceDir,
++        target,
++        date,
++      });
++      await withMemoryFileLock(absPath, async () => {
++        await ensureMemoryFile(absPath, ctx.workspaceDir);
++        const separator = await resolveMemoryAppendSeparator(absPath);
++        await fs.appendFile(absPath, `${separator}${entry}\n`, "utf-8");
++      });
++      return jsonResult({
++        ok: true,
++        target,
++        path: asWorkspaceRelativePath(absPath, ctx.workspaceDir),
++        date: target === "daily" ? date : undefined,
++        appended: entry,
++      });
++    },
++  };
++}
++
++export function createMemoryUpsertTool(options: {
++  config?: OpenClawConfig;
++  agentSessionKey?: string;
++}): AnyAgentTool | null {
++  const ctx = resolveMemoryWriteToolContext(options);
++  if (!ctx) {
++    return null;
++  }
++  return {
++    label: "Memory Upsert",
++    name: "memory_upsert",
++    description:
++      "Upsert a keyed durable note in MEMORY.md or memory/YYYY-MM-DD.md. Reuses key:<id> to update existing memory instead of appending duplicates.",
++    parameters: MemoryUpsertSchema,
++    execute: async (_toolCallId, params) => {
++      const keyRaw = readStringParam(params, "key", { required: true });
++      const key = normalizeMemoryKey(keyRaw);
++      if (!key) {
++        throw new ToolInputError("key is required");
++      }
++      const text = normalizeMemoryText(readStringParam(params, "text", { required: true }));
++      if (!text) {
++        throw new ToolInputError("text is required");
++      }
++      const target = readMemoryTarget(params, "target", "longterm");
++      const requestedDate = readStringParam(params, "date");
++      const date = resolveMemoryWriteDate(ctx.cfg, target, requestedDate);
++      const body = formatMemoryEntry({
++        text,
++        kind: readStringParam(params, "kind"),
++        source: readStringParam(params, "source"),
++        confidence: readNumberParam(params, "confidence"),
++      });
++      const entry = `- [key:${key}] ${body.slice(2)}`;
++      const absPath = await resolveMemoryWritePath({
++        workspaceDir: ctx.workspaceDir,
++        target,
++        date,
++      });
++      const updated = await withMemoryFileLock(absPath, async () => {
++        await ensureMemoryFile(absPath, ctx.workspaceDir);
++        const current = await readMemoryFileOrEmpty(absPath);
++        const lines = current.length > 0 ? current.split(/\r?\n/) : [];
++        while (lines.length > 0 && lines.at(-1) === "") {
++          lines.pop();
++        }
++        const prefix = `- [key:${key}] `;
++        const blocks = groupMemoryEntryBlocks(lines);
++        const existingIndexes = blocks.flatMap((block, index) =>
++          block[0]?.startsWith(prefix) ? [index] : [],
++        );
++        const alreadyExists = existingIndexes.length > 0;
++        const nextBlocks = blocks.filter((block) => !block[0]?.startsWith(prefix));
++        if (alreadyExists) {
++          nextBlocks.splice(
++            Math.min(existingIndexes[0] ?? nextBlocks.length, nextBlocks.length),
++            0,
++            [entry],
++          );
++        } else {
++          nextBlocks.push([entry]);
++        }
++        await fs.writeFile(absPath, `${nextBlocks.flat().join("\n")}\n`, "utf-8");
++        return alreadyExists;
++      });
++      return jsonResult({
++        ok: true,
++        updated,
++        key,
++        target,
++        path: asWorkspaceRelativePath(absPath, ctx.workspaceDir),
++        date: target === "daily" ? date : undefined,
++        value: entry,
++      });
++    },
++  };
++}
++
++function readMemoryTarget(
++  params: Record<string, unknown>,
++  field: string,
++  fallback: "daily" | "longterm",
++): "daily" | "longterm" {
++  const raw = readStringParam(params, field)?.trim().toLowerCase();
++  if (!raw) {
++    return fallback;
++  }
++  if (raw === "daily" || raw === "longterm") {
++    return raw;
++  }
++  throw new ToolInputError(`${field} must be "daily" or "longterm"`);
++}
++
++function normalizeMemoryDate(cfg: OpenClawConfig, raw?: string): string {
++  if (!raw) {
++    return formatDateStampInTimezone(
++      Date.now(),
++      resolveUserTimezone(cfg.agents?.defaults?.userTimezone),
++    );
++  }
++  const trimmed = raw.trim();
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
++    throw new ToolInputError(`date must be YYYY-MM-DD`);
++  }
++  return trimmed;
++}
++
++function resolveMemoryWriteDate(
++  cfg: OpenClawConfig,
++  target: "daily" | "longterm",
++  raw?: string,
++): string | undefined {
++  if (target !== "daily") {
++    return undefined;
++  }
++  return normalizeMemoryDate(cfg, raw);
++}
++
++function formatDateStampInTimezone(nowMs: number, timezone: string): string {
++  const parts = new Intl.DateTimeFormat("en-US", {
++    timeZone: timezone,
++    year: "numeric",
++    month: "2-digit",
++    day: "2-digit",
++  }).formatToParts(new Date(nowMs));
++  const year = parts.find((part) => part.type === "year")?.value;
++  const month = parts.find((part) => part.type === "month")?.value;
++  const day = parts.find((part) => part.type === "day")?.value;
++  if (year && month && day) {
++    return `${year}-${month}-${day}`;
++  }
++  return new Date(nowMs).toISOString().slice(0, 10);
++}
++
++function normalizeMemoryText(raw: string): string {
++  const normalized = raw
++    .replace(/\s*\n+\s*/g, " ")
++    .replace(/\s+/g, " ")
++    .trim();
++  if (!normalized) {
++    return "";
++  }
++  return /^\[key:/i.test(normalized) ? `\\${normalized}` : normalized;
++}
++
++function normalizeMemoryKey(raw: string): string {
++  return raw
++    .trim()
++    .replace(/\s+/g, "-")
++    .replace(/[^a-zA-Z0-9._:-]/g, "")
++    .toLowerCase();
++}
++
++function normalizeMemoryMetaValue(raw?: string): string | undefined {
++  if (!raw) {
++    return undefined;
++  }
++  const normalized = raw
++    .replace(/\s*\n+\s*/g, " ")
++    .replace(/[()[\],]/g, " ")
++    .replace(/\s+/g, " ")
++    .trim();
++  return normalized || undefined;
++}
++
++function formatMemoryEntry(params: {
++  text: string;
++  kind?: string;
++  source?: string;
++  confidence?: number;
++}): string {
++  const meta: string[] = [];
++  const kind = normalizeMemoryMetaValue(params.kind);
++  if (kind) {
++    meta.push(`kind:${kind}`);
++  }
++  const source = normalizeMemoryMetaValue(params.source);
++  if (source) {
++    meta.push(`source:${source}`);
++  }
++  if (typeof params.confidence === "number" && Number.isFinite(params.confidence)) {
++    const clamped = Math.max(0, Math.min(1, params.confidence));
++    meta.push(`confidence:${clamped.toFixed(2)}`);
++  }
++  const suffix = meta.length > 0 ? ` (${meta.join(", ")})` : "";
++  return `- ${params.text}${suffix}`;
++}
++
++function groupMemoryEntryBlocks(lines: string[]): string[][] {
++  const blocks: string[][] = [];
++  let current: string[] = [];
++  let pendingBlankLines: string[] = [];
++  for (const line of lines) {
++    if (line === "") {
++      if (current.length === 0) {
++        blocks.push([line]);
++      } else {
++        pendingBlankLines.push(line);
++      }
++      continue;
++    }
++    const isIndented = /^[ \t]/.test(line);
++    if (current.length === 0) {
++      current = [...pendingBlankLines, line];
++      pendingBlankLines = [];
++      continue;
++    }
++    if (isIndented) {
++      current.push(...pendingBlankLines, line);
++      pendingBlankLines = [];
++      continue;
++    }
++    blocks.push(current);
++    blocks.push(...pendingBlankLines.map((blankLine) => [blankLine]));
++    pendingBlankLines = [];
++    current = [line];
++  }
++  if (current.length > 0) {
++    blocks.push(current);
++  }
++  blocks.push(...pendingBlankLines.map((blankLine) => [blankLine]));
++  return blocks;
++}
++
++async function resolveMemoryWritePath(params: {
++  workspaceDir: string;
++  target: "daily" | "longterm";
++  date?: string;
++}): Promise<string> {
++  if (params.target === "longterm") {
++    return await resolveLongtermMemoryWritePath(params.workspaceDir);
++  }
++  if (!params.date) {
++    throw new ToolInputError("date must be YYYY-MM-DD");
++  }
++  return path.join(params.workspaceDir, "memory", `${params.date}.md`);
++}
++
++async function resolveLongtermMemoryWritePath(workspaceDir: string): Promise<string> {
++  const primary = path.join(workspaceDir, "MEMORY.md");
++  if (await pathExists(primary)) {
++    return primary;
++  }
++  const legacy = path.join(workspaceDir, "memory.md");
++  if (await pathExists(legacy)) {
++    return legacy;
++  }
++  return primary;
++}
++
++async function pathExists(absPath: string): Promise<boolean> {
++  try {
++    await fs.lstat(absPath);
++    return true;
++  } catch (err) {
++    if (isMissingFileError(err)) {
++      return false;
++    }
++    throw err;
++  }
++}
++
++async function ensureMemoryFile(absPath: string, workspaceDir: string) {
++  await assertMemoryWritePathSafe(absPath, workspaceDir);
++  await fs.mkdir(path.dirname(absPath), { recursive: true });
++  try {
++    await fs.access(absPath);
++  } catch {
++    await fs.writeFile(absPath, "", "utf-8");
++  }
++}
++
++async function readMemoryFileOrEmpty(absPath: string): Promise<string> {
++  try {
++    return await fs.readFile(absPath, "utf-8");
++  } catch (err) {
++    if (isMissingFileError(err)) {
++      return "";
++    }
++    throw err;
++  }
++}
++
++async function assertMemoryWritePathSafe(absPath: string, workspaceDir: string) {
++  const relPath = path.relative(workspaceDir, absPath);
++  if (!relPath || relPath.startsWith("..") || path.isAbsolute(relPath)) {
++    throw new ToolInputError("memory path must stay inside the workspace");
++  }
++  const segments = relPath.split(path.sep).filter(Boolean);
++  let current = workspaceDir;
++  for (const [index, segment] of segments.entries()) {
++    current = path.join(current, segment);
++    let stat;
++    try {
++      stat = await fs.lstat(current);
++    } catch (err) {
++      if (isMissingFileError(err)) {
++        return;
++      }
++      throw err;
++    }
++    if (stat.isSymbolicLink()) {
++      throw new ToolInputError("memory path cannot use symlinks");
++    }
++    const isLast = index === segments.length - 1;
++    if (isLast) {
++      if (!stat.isFile()) {
++        throw new ToolInputError("memory path must be a regular file");
++      }
++      continue;
++    }
++    if (!stat.isDirectory()) {
++      throw new ToolInputError("memory parent path must be a directory");
++    }
++  }
++}
++
++function isMissingFileError(err: unknown): err is NodeJS.ErrnoException {
++  return err instanceof Error && "code" in err && err.code === "ENOENT";
++}
++
++async function resolveMemoryAppendSeparator(absPath: string): Promise<string> {
++  const current = await fs.readFile(absPath, "utf-8");
++  return current.length > 0 && !current.endsWith("\n") ? "\n" : "";
++}
++
++function asWorkspaceRelativePath(absPath: string, workspaceDir: string): string {
++  const rel = path.relative(workspaceDir, absPath).replace(/\\/g, "/");
++  if (!rel || rel.startsWith("..")) {
++    return path.basename(absPath);
++  }
++  return rel;
++}
++
+ function resolveMemoryCitationsMode(cfg: OpenClawConfig): MemoryCitationsMode {
+   const mode = cfg.memory?.citations;
+   if (mode === "on" || mode === "off" || mode === "auto") {
+diff --git a/src/plugins/runtime/runtime-tools.ts b/src/plugins/runtime/runtime-tools.ts
+index 66d98af02b25..061664af8c03 100644
+--- a/src/plugins/runtime/runtime-tools.ts
++++ b/src/plugins/runtime/runtime-tools.ts
+@@ -1,4 +1,9 @@
+-import { createMemoryGetTool, createMemorySearchTool } from "../../agents/tools/memory-tool.js";
++import {
++  createMemoryGetTool,
++  createMemorySearchTool,
++  createMemoryUpsertTool,
++  createMemoryWriteTool,
++} from "../../agents/tools/memory-tool.js";
+ import { registerMemoryCli } from "../../cli/memory-cli.js";
+ import type { PluginRuntime } from "./types.js";
+ 
+@@ -6,6 +11,8 @@ export function createRuntimeTools(): PluginRuntime["tools"] {
+   return {
+     createMemoryGetTool,
+     createMemorySearchTool,
++    createMemoryWriteTool,
++    createMemoryUpsertTool,
+     registerMemoryCli,
+   };
+ }
+diff --git a/src/plugins/runtime/types-core.ts b/src/plugins/runtime/types-core.ts
+index 524b3a5f6a2b..c2b528297e11 100644
+--- a/src/plugins/runtime/types-core.ts
++++ b/src/plugins/runtime/types-core.ts
+@@ -36,6 +36,8 @@ export type PluginRuntimeCore = {
+   tools: {
+     createMemoryGetTool: typeof import("../../agents/tools/memory-tool.js").createMemoryGetTool;
+     createMemorySearchTool: typeof import("../../agents/tools/memory-tool.js").createMemorySearchTool;
++    createMemoryWriteTool: typeof import("../../agents/tools/memory-tool.js").createMemoryWriteTool;
++    createMemoryUpsertTool: typeof import("../../agents/tools/memory-tool.js").createMemoryUpsertTool;
+     registerMemoryCli: typeof import("../../cli/memory-cli.js").registerMemoryCli;
+   };
+   events: {
+diff --git a/src/secrets/runtime.test.ts b/src/secrets/runtime.test.ts
+index 02b5f84f9a6f..7e44798b1de7 100644
+--- a/src/secrets/runtime.test.ts
++++ b/src/secrets/runtime.test.ts
+@@ -532,18 +532,9 @@ describe("secrets runtime snapshot", () => {
+   it("keeps active secrets runtime snapshots resolved after config writes", async () => {
+     await withTempHome("openclaw-secrets-runtime-write-", async (home) => {
+       const configDir = path.join(home, ".openclaw");
+-      const secretFile = path.join(configDir, "secrets.json");
+       const agentDir = path.join(configDir, "agents", "main", "agent");
+       const authStorePath = path.join(agentDir, "auth-profiles.json");
+       await fs.mkdir(agentDir, { recursive: true });
+-      await fs.chmod(configDir, 0o700).catch(() => {
+-        // best-effort on tmp dirs that already have secure perms
+-      });
+-      await fs.writeFile(
+-        secretFile,
+-        `${JSON.stringify({ providers: { openai: { apiKey: "sk-file-runtime" } } }, null, 2)}\n`, // pragma: allowlist secret
+-        { encoding: "utf8", mode: 0o600 },
+-      );
+       await fs.writeFile(
+         authStorePath,
+         `${JSON.stringify(
+@@ -553,7 +544,7 @@ describe("secrets runtime snapshot", () => {
+               "openai:default": {
+                 type: "api_key",
+                 provider: "openai",
+-                keyRef: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++                keyRef: OPENAI_ENV_KEY_REF,
+               },
+             },
+           },
+@@ -565,21 +556,19 @@ describe("secrets runtime snapshot", () => {
+ 
+       const prepared = await prepareSecretsRuntimeSnapshot({
+         config: asConfig({
+-          secrets: {
+-            providers: {
+-              default: { source: "file", path: secretFile, mode: "json" },
+-            },
+-          },
+           models: {
+             providers: {
+               openai: {
+                 baseUrl: "https://api.openai.com/v1",
+-                apiKey: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++                apiKey: OPENAI_ENV_KEY_REF,
+                 models: [],
+               },
+             },
+           },
+         }),
++        env: {
++          OPENAI_API_KEY: "sk-file-runtime", // pragma: allowlist secret
++        },
+         agentDirs: [agentDir],
+       });
+ 
+@@ -608,18 +597,9 @@ describe("secrets runtime snapshot", () => {
+   it("clears active secrets runtime state and throws when refresh fails after a write", async () => {
+     await withTempHome("openclaw-secrets-runtime-refresh-fail-", async (home) => {
+       const configDir = path.join(home, ".openclaw");
+-      const secretFile = path.join(configDir, "secrets.json");
+       const agentDir = path.join(configDir, "agents", "main", "agent");
+       const authStorePath = path.join(agentDir, "auth-profiles.json");
+       await fs.mkdir(agentDir, { recursive: true });
+-      await fs.chmod(configDir, 0o700).catch(() => {
+-        // best-effort on tmp dirs that already have secure perms
+-      });
+-      await fs.writeFile(
+-        secretFile,
+-        `${JSON.stringify({ providers: { openai: { apiKey: "sk-file-runtime" } } }, null, 2)}\n`,
+-        { encoding: "utf8", mode: 0o600 },
+-      );
+       await fs.writeFile(
+         authStorePath,
+         `${JSON.stringify(
+@@ -629,7 +609,7 @@ describe("secrets runtime snapshot", () => {
+               "openai:default": {
+                 type: "api_key",
+                 provider: "openai",
+-                keyRef: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++                keyRef: OPENAI_ENV_KEY_REF,
+               },
+             },
+           },
+@@ -649,28 +629,26 @@ describe("secrets runtime snapshot", () => {
+           "openai:default": {
+             type: "api_key",
+             provider: "openai",
+-            keyRef: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++            keyRef: OPENAI_ENV_KEY_REF,
+           },
+         });
+       };
+ 
+       const prepared = await prepareSecretsRuntimeSnapshot({
+         config: asConfig({
+-          secrets: {
+-            providers: {
+-              default: { source: "file", path: secretFile, mode: "json" },
+-            },
+-          },
+           models: {
+             providers: {
+               openai: {
+                 baseUrl: "https://api.openai.com/v1",
+-                apiKey: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++                apiKey: OPENAI_ENV_KEY_REF,
+                 models: [],
+               },
+             },
+           },
+         }),
++        env: {
++          OPENAI_API_KEY: "sk-file-runtime", // pragma: allowlist secret
++        },
+         agentDirs: [agentDir],
+         loadAuthStore,
+       });
+@@ -688,16 +666,12 @@ describe("secrets runtime snapshot", () => {
+ 
+       expect(getActiveSecretsRuntimeSnapshot()).toBeNull();
+       expect(loadConfig().gateway?.auth).toEqual({ mode: "token" });
+-      expect(loadConfig().models?.providers?.openai?.apiKey).toEqual({
+-        source: "file",
+-        provider: "default",
+-        id: "/providers/openai/apiKey",
+-      });
++      expect(loadConfig().models?.providers?.openai?.apiKey).toEqual(OPENAI_ENV_KEY_REF);
+ 
+       const persistedStore = ensureAuthProfileStore(agentDir).profiles["openai:default"];
+       expect(persistedStore).toMatchObject({
+         type: "api_key",
+-        keyRef: { source: "file", provider: "default", id: "/providers/openai/apiKey" },
++        keyRef: OPENAI_ENV_KEY_REF,
+       });
+       expect("key" in persistedStore ? persistedStore.key : undefined).toBeUndefined();
+     });

@@ -1,0 +1,392 @@
+diff --git a/src/discord/monitor/gateway-plugin.crash-guard.test.ts b/src/discord/monitor/gateway-plugin.crash-guard.test.ts
+new file mode 100644
+index 000000000000..4709f423c5bb
+--- /dev/null
++++ b/src/discord/monitor/gateway-plugin.crash-guard.test.ts
+@@ -0,0 +1,251 @@
++import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
++
++const {
++  GatewayIntents,
++  baseRegisterClientSpy,
++  GatewayPlugin,
++  HttpsProxyAgent,
++  undiciFetchMock,
++  undiciProxyAgentSpy,
++  webSocketSpy,
++  wsProxyAgentSpy,
++  resetLastAgent,
++} = vi.hoisted(() => {
++  const wsProxyAgentSpy = vi.fn();
++  const undiciProxyAgentSpy = vi.fn();
++  const undiciFetchMock = vi.fn();
++  const baseRegisterClientSpy = vi.fn();
++  const webSocketSpy = vi.fn();
++
++  const GatewayIntents = {
++    Guilds: 1 << 0,
++    GuildMessages: 1 << 1,
++    MessageContent: 1 << 2,
++    DirectMessages: 1 << 3,
++    GuildMessageReactions: 1 << 4,
++    DirectMessageReactions: 1 << 5,
++    GuildPresences: 1 << 6,
++    GuildMembers: 1 << 7,
++    GuildVoiceStates: 1 << 8,
++  } as const;
++
++  class GatewayPlugin {
++    options: unknown;
++    gatewayInfo: unknown;
++    constructor(options?: unknown, gatewayInfo?: unknown) {
++      this.options = options;
++      this.gatewayInfo = gatewayInfo;
++    }
++    async registerClient(client: unknown) {
++      return baseRegisterClientSpy(client);
++    }
++  }
++
++  class HttpsProxyAgent {
++    static lastCreated: HttpsProxyAgent | undefined;
++    proxyUrl: string;
++    constructor(proxyUrl: string) {
++      if (proxyUrl === "bad-proxy") {
++        throw new Error("bad proxy");
++      }
++      this.proxyUrl = proxyUrl;
++      HttpsProxyAgent.lastCreated = this;
++      wsProxyAgentSpy(proxyUrl);
++    }
++  }
++
++  return {
++    baseRegisterClientSpy,
++    GatewayIntents,
++    GatewayPlugin,
++    HttpsProxyAgent,
++    undiciFetchMock,
++    undiciProxyAgentSpy,
++    resetLastAgent: () => {
++      HttpsProxyAgent.lastCreated = undefined;
++    },
++    webSocketSpy,
++    wsProxyAgentSpy,
++  };
++});
++
++vi.mock("@buape/carbon/gateway", () => ({
++  GatewayIntents,
++  GatewayPlugin,
++}));
++
++vi.mock("https-proxy-agent", () => ({
++  HttpsProxyAgent,
++}));
++
++vi.mock("undici", () => ({
++  ProxyAgent: class {
++    proxyUrl: string;
++    constructor(proxyUrl: string) {
++      this.proxyUrl = proxyUrl;
++      undiciProxyAgentSpy(proxyUrl);
++    }
++  },
++  fetch: undiciFetchMock,
++}));
++
++vi.mock("ws", () => ({
++  default: class MockWebSocket {
++    constructor(url: string, options?: { agent?: unknown }) {
++      webSocketSpy(url, options);
++    }
++  },
++}));
++
++type TestablePlugin = {
++  registerClient: (client: { options: { token: string } }) => Promise<void>;
++  gatewayInfo: unknown;
++};
++
++/** Check that runtime.error was called with a string containing `needle` (ignoring ANSI codes). */
++function expectErrorContaining(runtime: { error: ReturnType<typeof vi.fn> }, needle: string) {
++  const calls = runtime.error.mock.calls;
++  const found = calls.some((args: unknown[]) => {
++    // eslint-disable-next-line no-control-regex
++    const raw = String(args[0]).replace(/\u001b\[[^m]*m/g, "");
++    return raw.includes(needle);
++  });
++  expect(found, `Expected runtime.error to be called with message containing "${needle}"`).toBe(
++    true,
++  );
++}
++
++function expectNoError(runtime: { error: ReturnType<typeof vi.fn> }) {
++  expect(runtime.error).not.toHaveBeenCalled();
++}
++
++describe("gateway-plugin crash guard (#34592)", () => {
++  let createDiscordGatewayPlugin: typeof import("./gateway-plugin.js").createDiscordGatewayPlugin;
++
++  beforeAll(async () => {
++    ({ createDiscordGatewayPlugin } = await import("./gateway-plugin.js"));
++  });
++
++  function createRuntime() {
++    return {
++      log: vi.fn(),
++      error: vi.fn(),
++      exit: vi.fn(() => {
++        throw new Error("exit");
++      }),
++    };
++  }
++
++  const fakeClient = { options: { token: "test-token" } };
++
++  beforeEach(() => {
++    baseRegisterClientSpy.mockClear();
++    baseRegisterClientSpy.mockReset();
++    undiciFetchMock.mockClear();
++    undiciFetchMock.mockReset();
++    undiciProxyAgentSpy.mockClear();
++    wsProxyAgentSpy.mockClear();
++    webSocketSpy.mockClear();
++    resetLastAgent();
++  });
++
++  describe("no proxy (SafeGatewayPlugin)", () => {
++    it("does not throw when super.registerClient rejects", async () => {
++      baseRegisterClientSpy.mockRejectedValue(new Error("fetch failed"));
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: {},
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      // Should not throw — rejection is caught internally
++      await plugin.registerClient(fakeClient);
++
++      expectErrorContaining(runtime, "gateway registerClient failed");
++    });
++
++    it("works normally when super.registerClient succeeds", async () => {
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: {},
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      await plugin.registerClient(fakeClient);
++
++      expect(baseRegisterClientSpy).toHaveBeenCalledWith(fakeClient);
++      expectNoError(runtime);
++    });
++  });
++
++  describe("with proxy (ProxyGatewayPlugin)", () => {
++    it("falls back to default gateway info when proxy fetch fails", async () => {
++      undiciFetchMock.mockRejectedValue(new Error("network unreachable"));
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: { proxy: "http://proxy.test:8080" },
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      await plugin.registerClient(fakeClient);
++
++      expectErrorContaining(runtime, "failed to fetch gateway info via proxy");
++      expect(plugin.gatewayInfo).toEqual(
++        expect.objectContaining({
++          url: "wss://gateway.discord.gg/",
++          shards: 1,
++        }),
++      );
++      expect(baseRegisterClientSpy).toHaveBeenCalledWith(fakeClient);
++    });
++
++    it("does not throw when both proxy fetch and super.registerClient fail", async () => {
++      undiciFetchMock.mockRejectedValue(new Error("network unreachable"));
++      baseRegisterClientSpy.mockRejectedValue(new Error("connect failed"));
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: { proxy: "http://proxy.test:8080" },
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      // Should not throw
++      await plugin.registerClient(fakeClient);
++
++      expectErrorContaining(runtime, "failed to fetch gateway info via proxy");
++      expectErrorContaining(runtime, "gateway registerClient failed");
++    });
++
++    it("works normally when proxy fetch succeeds", async () => {
++      undiciFetchMock.mockResolvedValue({
++        json: async () => ({ url: "wss://gateway.discord.gg/" }),
++      });
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: { proxy: "http://proxy.test:8080" },
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      await plugin.registerClient(fakeClient);
++
++      expect(baseRegisterClientSpy).toHaveBeenCalledWith(fakeClient);
++      expectNoError(runtime);
++    });
++  });
++
++  describe("invalid proxy fallback", () => {
++    it("returns SafeGatewayPlugin that catches registerClient errors", async () => {
++      baseRegisterClientSpy.mockRejectedValue(new Error("kaboom"));
++      const runtime = createRuntime();
++      const plugin = createDiscordGatewayPlugin({
++        discordConfig: { proxy: "bad-proxy" },
++        runtime,
++      }) as unknown as TestablePlugin;
++
++      // Should not throw even when super rejects
++      await plugin.registerClient(fakeClient);
++
++      expectErrorContaining(runtime, "invalid gateway proxy");
++      expectErrorContaining(runtime, "gateway registerClient failed");
++    });
++  });
++});
+diff --git a/src/discord/monitor/gateway-plugin.ts b/src/discord/monitor/gateway-plugin.ts
+index c86b6259c5e8..4445d7652fbf 100644
+--- a/src/discord/monitor/gateway-plugin.ts
++++ b/src/discord/monitor/gateway-plugin.ts
+@@ -27,6 +27,64 @@ export function resolveDiscordGatewayIntents(
+   return intents;
+ }
+ 
++/**
++ * Default gateway info used when the Discord API is unreachable.
++ * Provides the standard gateway URL so Carbon's reconnect logic can still
++ * attempt WebSocket connections with exponential backoff.
++ */
++const FALLBACK_GATEWAY_INFO: APIGatewayBotInfo = {
++  url: "wss://gateway.discord.gg/",
++  shards: 1,
++  session_start_limit: {
++    total: 1000,
++    remaining: 1000,
++    reset_after: 14_400_000,
++    max_concurrency: 1,
++  },
++};
++
++/**
++ * Log a registerClient failure instead of letting it become an unhandled
++ * promise rejection that crashes the gateway process.
++ */
++function logRegisterClientFailure(error: unknown, runtime: RuntimeEnv): void {
++  runtime.error?.(
++    danger(
++      `discord: gateway registerClient failed: ${error instanceof Error ? error.message : String(error)}. ` +
++        "The gateway will remain disconnected; other channels are unaffected.",
++    ),
++  );
++}
++
++/**
++ * Create a GatewayPlugin subclass that catches unhandled promise rejections
++ * from `registerClient`. Carbon's `Client` constructor calls
++ * `plugin.registerClient(this)` without awaiting the returned promise, so
++ * any rejection would crash the gateway process.
++ */
++function createSafeGatewayPlugin(
++  gatewayOptions: ConstructorParameters<typeof GatewayPlugin>[0],
++  runtime: RuntimeEnv,
++): GatewayPlugin {
++  class SafeGatewayPlugin extends GatewayPlugin {
++    constructor() {
++      super(gatewayOptions);
++    }
++
++    override async registerClient(
++      client: Parameters<GatewayPlugin["registerClient"]>[0],
++    ): Promise<void> {
++      try {
++        await super.registerClient(client);
++      } catch (error) {
++        logRegisterClientFailure(error, runtime);
++      }
++    }
++  }
++
++  return new SafeGatewayPlugin();
++}
++
+ export function createDiscordGatewayPlugin(params: {
+   discordConfig: DiscordAccountConfig;
+   runtime: RuntimeEnv;
+@@ -40,7 +98,7 @@ export function createDiscordGatewayPlugin(params: {
+   };
+ 
+   if (!proxy) {
+-    return new GatewayPlugin(options);
++    return createSafeGatewayPlugin(options, params.runtime);
+   }
+ 
+   try {
+@@ -54,7 +112,9 @@ export function createDiscordGatewayPlugin(params: {
+         super(options);
+       }
+ 
+-      override async registerClient(client: Parameters<GatewayPlugin["registerClient"]>[0]) {
++      override async registerClient(
++        client: Parameters<GatewayPlugin["registerClient"]>[0],
++      ): Promise<void> {
+         if (!this.gatewayInfo) {
+           try {
+             const response = await undiciFetch("https://discord.com/api/v10/gateway/bot", {
+@@ -65,13 +125,20 @@ export function createDiscordGatewayPlugin(params: {
+             } as Record<string, unknown>);
+             this.gatewayInfo = (await response.json()) as APIGatewayBotInfo;
+           } catch (error) {
+-            throw new Error(
+-              `Failed to get gateway information from Discord: ${error instanceof Error ? error.message : String(error)}`,
+-              { cause: error },
++            params.runtime.error?.(
++              danger(
++                `discord: failed to fetch gateway info via proxy: ${error instanceof Error ? error.message : String(error)}. ` +
++                  "Falling back to default gateway URL.",
++              ),
+             );
++            this.gatewayInfo = { ...FALLBACK_GATEWAY_INFO };
+           }
+         }
+-        return super.registerClient(client);
++        try {
++          await super.registerClient(client);
++        } catch (error) {
++          logRegisterClientFailure(error, params.runtime);
++        }
+       }
+ 
+       override createWebSocket(url: string) {
+@@ -82,6 +149,6 @@ export function createDiscordGatewayPlugin(params: {
+     return new ProxyGatewayPlugin();
+   } catch (err) {
+     params.runtime.error?.(danger(`discord: invalid gateway proxy: ${String(err)}`));
+-    return new GatewayPlugin(options);
++    return createSafeGatewayPlugin(options, params.runtime);
+   }
+ }
+diff --git a/src/discord/monitor/provider.proxy.test.ts b/src/discord/monitor/provider.proxy.test.ts
+index 4d43469e2e41..02247d56e9c7 100644
+--- a/src/discord/monitor/provider.proxy.test.ts
++++ b/src/discord/monitor/provider.proxy.test.ts
+@@ -161,7 +161,7 @@ describe("createDiscordGatewayPlugin", () => {
+       runtime,
+     });
+ 
+-    expect(Object.getPrototypeOf(plugin)).toBe(GatewayPlugin.prototype);
++    expect(plugin).toBeInstanceOf(GatewayPlugin);
+     expect(runtime.error).toHaveBeenCalled();
+     expect(runtime.log).not.toHaveBeenCalled();
+   });
