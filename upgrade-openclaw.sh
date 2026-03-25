@@ -18,7 +18,7 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 
 PATCHES_DIR="$(cd "$(dirname "$0")" && pwd)"
-OPENCLAW_ROOT="/opt/homebrew/lib/node_modules/openclaw"
+OPENCLAW_ROOT="/Users/mahsum/.npm-global/lib/node_modules/openclaw"
 VERSIONS_DIR="$OPENCLAW_ROOT/dist-versions"
 ACTIVE_LINK="$OPENCLAW_ROOT/dist-active"
 CONF="$PATCHES_DIR/pr-patches.conf"
@@ -28,6 +28,13 @@ NOTIFY_SCRIPT="$PATCHES_DIR/notify.sh"
 RUNTIME_PATCHES="$PATCHES_DIR/runtime-patches"
 
 CURRENT_VERSION=$(node -e "console.log(require('$OPENCLAW_ROOT/package.json').version)" 2>/dev/null || echo "unknown")
+
+# Resolve the actual git tag (may have -N suffix like v2026.3.13-1)
+CURRENT_GIT_TAG="v$CURRENT_VERSION"
+_resolved=$(gh api "repos/openclaw/openclaw/git/refs/tags/v${CURRENT_VERSION}" --jq '.[0].ref // .ref' 2>/dev/null | sed 's|refs/tags/||' || echo "")
+if [ -n "$_resolved" ] && [ "$_resolved" != "v$CURRENT_VERSION" ]; then
+  CURRENT_GIT_TAG="$_resolved"
+fi
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -110,8 +117,8 @@ if [ "$ROLLBACK" = true ]; then
   fi
 
   info "Rolling back: $CURRENT_NAME → $(basename "$PREV")"
-  sudo ln -sfn "$PREV" "${ACTIVE_LINK}-tmp"
-  sudo mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
+  ln -sfn "$PREV" "${ACTIVE_LINK}-tmp"
+  mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
   ok "Symlink updated"
 
   info "Restarting gateway..."
@@ -154,15 +161,15 @@ PATCH_MERGED=0
 PATCH_FIX=0
 
 # Get changed files between versions
-info "Fetching upstream changes: v$CURRENT_VERSION → $TARGET_TAG"
+info "Fetching upstream changes: $CURRENT_GIT_TAG → $TARGET_TAG"
 CHANGED_FILES_CACHE="$SANDBOX-changes.txt"
 mkdir -p "$(dirname "$CHANGED_FILES_CACHE")"
 
-gh api "repos/openclaw/openclaw/compare/v${CURRENT_VERSION}...${TARGET_TAG}" \
+gh api "repos/openclaw/openclaw/compare/${CURRENT_GIT_TAG}...${TARGET_TAG}" \
   --jq '.files[].filename' > "$CHANGED_FILES_CACHE" 2>/dev/null || {
   warn "GitHub Compare API failed or >300 files — using git fallback"
   FALLBACK_DIR="/tmp/openclaw-compare-$$"
-  git clone --depth 1 --branch "v$CURRENT_VERSION" "$REPO" "$FALLBACK_DIR/old" 2>/dev/null
+  git clone --depth 1 --branch "$CURRENT_GIT_TAG" "$REPO" "$FALLBACK_DIR/old" 2>/dev/null
   git clone --depth 1 --branch "$TARGET_TAG" "$REPO" "$FALLBACK_DIR/new" 2>/dev/null
   diff -rq "$FALLBACK_DIR/old/src" "$FALLBACK_DIR/new/src" 2>/dev/null | \
     sed 's|.*src/|src/|' | awk '{print $1}' > "$CHANGED_FILES_CACHE" || true
@@ -246,7 +253,7 @@ while IFS='|' read -r pr_num description; do
   [[ "$pr_num" =~ ^EXP- ]] && continue
 
   # Strategy 0: Manual script
-  MANUAL_SCRIPT=$(ls "$PATCHES_DIR/manual-patches/${pr_num}-"*.sh 2>/dev/null | head -1)
+  MANUAL_SCRIPT=$(ls "$PATCHES_DIR/manual-patches/${pr_num}-"*.sh 2>/dev/null | head -1 || true)
   if [ -n "$MANUAL_SCRIPT" ]; then
     if bash "$MANUAL_SCRIPT" "$SANDBOX" 2>/dev/null; then
       ok "#$pr_num: manual script"
@@ -372,13 +379,13 @@ if [ -d "$TARGET_DIST" ]; then
 fi
 
 info "Copying build output → $(basename "$TARGET_DIST")"
-sudo mkdir -p "$VERSIONS_DIR"
-sudo cp -R "$SANDBOX/dist" "$TARGET_DIST"
-sudo chown -R "$(whoami):staff" "$TARGET_DIST"
+mkdir -p "$VERSIONS_DIR"
+cp -R "$SANDBOX/dist" "$TARGET_DIST"
+chown -R "$(whoami):staff" "$TARGET_DIST"
 
 info "Atomic symlink swap..."
-sudo ln -sfn "$TARGET_DIST" "${ACTIVE_LINK}-tmp"
-sudo mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
+ln -sfn "$TARGET_DIST" "${ACTIVE_LINK}-tmp"
+mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
 ok "Swap complete: dist-active → $(basename "$TARGET_DIST")"
 
 # Trim old versions (keep max 3)
@@ -389,7 +396,7 @@ if [ "$VERSION_COUNT" -gt 3 ]; then
     FULL_PATH="$VERSIONS_DIR/$old"
     # Never delete the active version
     if [ "$(readlink "$ACTIVE_LINK")" != "$FULL_PATH" ]; then
-      sudo rm -rf "$FULL_PATH"
+      rm -rf "$FULL_PATH"
       info "Removed: $old"
     fi
   done
@@ -434,8 +441,8 @@ done
 if [ "$HEALTH_OK" = false ]; then
   fail "Gateway failed health checks — rolling back"
   if [ -n "$PREV_ACTIVE" ]; then
-    sudo ln -sfn "$VERSIONS_DIR/$PREV_ACTIVE" "${ACTIVE_LINK}-tmp"
-    sudo mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
+    ln -sfn "$VERSIONS_DIR/$PREV_ACTIVE" "${ACTIVE_LINK}-tmp"
+    mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
     launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
     warn "Rolled back to $PREV_ACTIVE"
   fi
