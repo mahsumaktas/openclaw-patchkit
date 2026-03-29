@@ -135,6 +135,9 @@ notify() {
             _send_telegram "$title" "$message" "$color_name"
             _send_discord "$title" "$message" "$color_name"
             ;;
+        none|off|silent)
+            return 0
+            ;;
         *)
             _send_telegram "$title" "$message" "$color_name"
             ;;
