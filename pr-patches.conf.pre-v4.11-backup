@@ -1,0 +1,325 @@
+# OpenClaw PR patch list — Categorized
+# Format: PR_NUMBER | description  [risk:LEVEL] [verified:VERSION]
+# Lines starting with # are comments
+# Remove a line when the PR gets merged upstream
+#
+# Risk levels:
+#   low      — clean git apply (strategy 1)
+#   medium   — needed exclude-test or exclude-changelog strategy
+#   high     — has manual script in manual-patches/
+#   critical — FIX scripts or disabled patches
+#
+# Last updated: 2026-03-28
+# Base version: v2026.3.28 (git tag: v2026.3.28-1)
+# Total: 53 open patches + 1 FIX (A2) + 132 retired
+# v2026.3.13 upgrade (2026-03-14):
+#   Applied: 81/93 (63 manual, 13 clean, 5 excl-test) + 3 FIX (2 pre-build + 1 dist)
+#   Failed: 12 (24737,24764,25134,31876,35114,32580,40413,40080,36588,36486,26502[partial],25219)
+#   Skipped (closed): 21842,27175,24614,29533,27563,26565,34869,31890,25974,33494,28342,28238
+#   New scripts: 27142(redacted_thinking), 32265(v2), 37568(v2), 39117(busy-recovery), 26502(partial)
+#   rebuild-with-patches.sh: tag resolution fix (npm→git -1 suffix)
+# Retired in v2026.3.8: 25219, 26602, 26626, 27044, 28428, 34620, 27472
+# v2026.3.10 rebuild results (2026-03-10):
+#   Applied: 89/97 (64 manual, 19 clean, 6 excl-test) + 4 FIX (3 pre-build + 1 dist)
+#   Failed: 8 (27142,29533,31876,27563,35114,34580,39117,36486)
+# v2026.3.10 manual patch update:
+#   11 scripts written: 38320(rewrite),38338(new),14328,25169,31909,32267,26282,31056,26337,30999,29937
+#   38338 fixed: multi-line import handling for DEFAULT_DM_SCOPE insertion
+#   FIX-B1 deferred to post-build (dist-only patch)
+# Retired in v2026.3.1: 25416, 21896, 19077, 17375, 25974, 22711, 28291
+# Retired in v2026.3.1 (dist-verified): 23557, 25381, 22901, 26673, 28555, 11986, 16095
+# Retired in v2026.3.2: 22929, 26565, 27207, 27272, 24538, 22424
+# Retired in v2026.3.7: 12191, 12760, 14005, 14023, 16812, 18193, 21201, 21615, 23008, 23525, 24008, 24039, 24500, 24695, 24727, 24732, 24763, 24805, 25092, 25299, 25409, 25702, 25966, 25987, 26290, 26544, 26675, 26875, 27013, 27119, 27635, 27866, 28514, 28736, 31037, 31791, 31890, 31918, 31991, 32350, 33410, 33494, 34869
+# Retired in v2026.3.8: 25219, 26602, 26626, 27044, 28428, 34620
+# Retired FIX (v2026.3.1 upstream): FIX-A1, FIX-A3
+
+# ============================================
+# SECURITY PATCHES (14) — Upgrade'de ASLA cikarma
+# ============================================
+# RETIRED(v2026.3.23): 19675 | fix(security): zero-width Unicode boundary marker bypass  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 23008 | fix(security): prototype pollution in mergeConfigSection  [risk:medium] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 19191 | fix(security): harden cron file permissions to 0o600  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 25966 | security(gateway): cap pending pre-auth websocket handshakes  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 25973 | security(gateway): reject oversized pre-auth websocket frames  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 26544 | fix(security): enforce group chat agent allowlist in routing  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 25987 | security: remove agents dir from media serve allowlist  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.28-audit): 26337 | security: detect secrets in inbound messages  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 26675 | security: neutralize spoofed system messages in user input  [risk:high] [verified:v2026.3.1] — PR DELETED (fix still needed, rewrite as standalone)
+# RETIRED(v2026.3.23): 26533 | fix(security): add brute-force protection to pairing code validation  [risk:high] [verified:v2026.2.26]
+# DISABLED(2026-03-19): 26555 | fix(security): ignore Discord embed preview text in agent input  [risk:high] [verified:v2026.2.26] -- PR closed upstream, manual patch still fails on current base
+# RETIRED(v2026.3.28-audit): 27474 | fix: mask API key snippets in /models and /model status output  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28-audit): 16990 | fix(media): strip auth headers on cross-origin redirect  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.28-audit): 16992 | fix(gateway): escape XML in filename prevent prompt injection  [risk:medium] [verified:v2026.2.26]
+
+# ============================================
+# GATEWAY/DAEMON FIXES (17) — Platform-critical
+# ============================================
+# RETIRED(v2026.3.7): 24695 | fix(process): pid kill after group kill  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.28-audit): 15603 | fix(gateway): correct malformed HTTP 429 on WebSocket upgrade  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28-audit): 19134 | fix(gateway): specify utf-8 encoding on SSE res.write()  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 16015 | fix(gateway): truncate oversized message in chat.history  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 24763 | fix(gateway): include pairing requestId in close reason and recovery hints  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 25299 | fix(daemon): use launchctl kill instead of bootout in gateway stop  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+25276 | fix(exec): finalize child runs on exit not delayed stdio close  [risk:low] [verified:v2026.2.26]
+# RETIRED(2026-03-09): 26626 | fix(daemon): replace unconditional KeepAlive with SuccessfulExit dict — v2026.3.8 relies on KeepAlive=true for restart, patch would BREAK restart mechanism
+26441 | fix(gateway): graceful drain mode for restart/shutdown  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28-audit): 25093 | fix(gateway): hard-bind OpenAI/OpenResponses ingress as external non-owner  [risk:high] [verified:v2026.3.1]
+# RETIRED(v2026.3.7): 26875 | fix(gateway): undici TLS crash-loop on certificate rejection  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 27013 | fix(daemon): kill stale PID before port-conflict restart  [risk:high] [verified:v2026.2.26] — CLOSED/MERGED upstream
+26700 | fix(gateway): strip leaked EXTERNAL_UNTRUSTED_CONTENT wrappers  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 18446 | fix(gateway): /healthz endpoint return JSON instead of HTML  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28-audit): 26435 | fix(daemon): LaunchAgent post-update restart with version-aware plist  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 22112 | fix(doctor): warn when gateway is network-exposed without TLS  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 21842 | fix(gateway-cli): use wss:// scheme when gatewayTls is enabled  [risk:medium] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 27272 | fix(sessions): add bootId/pidStartTime to lock files to prevent PID recycling issues — SUPERSEDED by #31320 (PID recycling lock fix merged)
+28247 | bugfix: fix(gateway): fail fast on port-in-use to prevent systemd crash loop  [risk:low] [verified:v2026.2.26]
+
+# ============================================
+# SESSION/COMPACTION FIXES (7) — Veri butunlugu
+# ============================================
+# RETIRED(v2026.3.7): 21201 | fix(compaction): repair tool_use/tool_result pairing  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 14328 | fix: strip incomplete tool_use blocks prevent 400 loops  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 25381 | fix(agents): preserve thinking blocks in latest assistant during compaction — MERGED in v2026.3.1 dist (dropThinkingBlocks+latestAssistantIndex)
+# RETIRED(2026-03-03): 26673 | fix(compaction): apply contextTokens cap to SDK shouldCompact trigger — MERGED in v2026.3.1 dist (resolveContextWindowInfo)
+# RETIRED(v2026.3.23): 25169 | fix: drop toolResult with empty/blank call_id prevent session corruption  [risk:high] [verified:v2026.3.1]
+24759 | fix(openai): drop orphan tool results after tool-call filtering  [risk:low] [verified:v2026.2.26]
+25351 | fix(heartbeat): preserve transcript when heartbeat run made tool calls  [risk:low] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 23557 | fix: catch session JSONL write failures instead of crashing — MERGED in v2026.3.1 dist (safeAppend)
+27142 | fix: drop thinking blocks for Anthropic to prevent session corruption  [risk:low] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 16095 | fix: remove orphaned tool_result blocks during compaction — MERGED in v2026.3.1 dist (repairToolUseResultPairing post-compact)
+# RETIRED(v2026.3.23): 15050 | fix: transcript corruption resilience (run.ts only — repair.ts covered by #14328)  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 28555 | fix(compaction): prevent double-compaction from cache-ttl entry — MERGED in v2026.3.1 dist (cache-ttl guard)
+# RETIRED(2026-03-03): 22901 | fix: guard against NaN reserveTokens in compaction safeguard — MERGED in v2026.3.1 dist (reserveTokens NaN guard)
+# RETIRED(2026-03-03): 11986 | fix: drop empty assistant content blocks from error/aborted API responses (death spiral) — MERGED in v2026.3.1 dist (empty content block drop)
+
+# ============================================
+# CHANNEL/PLATFORM FIXES (13) — Kanal-spesifik
+# ============================================
+# RETIRED(2026-03-03): 24538 | fix(discord): replyToMode first/off delivery — SUPERSEDED (maintainer: 'commits on main')
+# RETIRED(v2026.3.7): 24500 | fix(telegram): streaming preview on error payload  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 22900 | fix(discord): set IS_COMPONENTS_V2 flag for v2 components  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28): upstream closed — 22025 | fix(telegram): accept colon provider ids in mdl_list callbacks  [risk:low] [verified:v2026.2.26]
+23184 | fix(auto-reply): prevent reminder guard note leaking into channel messages  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.28): upstream closed — 24737 | fix(telegram): record sent messages for reaction own mode filtering  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-02): 25974 | fix(discord): break resume death spiral — SUPERSEDED by v2026.3.1 clearResumeState()+stall counter
+# RETIRED(v2026.3.28): upstream closed — 27092 | fix(telegram): prevent 401 typing crash from killing bot process  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 27207 | fix(typing): add onCleanup to finally blocks preventing indicator leak — SUPERSEDED by #27250 (typing markDispatchIdle merged)
+# RETIRED(2026-03-09) 27319 | ALREADY-IN-v2026.3.7 | fix(discord): filter bot-own MESSAGE_CREATE events before debouncer  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 16812 | fix: sessions_send failing on Telegram, Discord, Signal, and Slack  [risk:high] [verified:v2026.2.26] — CLOSED/MERGED upstream
+27454 | fix(telegram): prevent crash loop on oversized file attachments  [risk:high] [verified:v2026.3.1]
+# RETIRED(v2026.3.23): 16995 | fix(telegram): record update ID before processing to prevent crash replay  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-10): 27472 | fix(telegram): ensure polling initialization is abortable and retries — upstream v2026.3.8 has abortable polling init
+# RETIRED(v2026.3.23): 27175 | fix(memory): prevent stuck typing on embedding model switch  [risk:medium] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 25280 | fix: sessions_send silent drop when A2A run fails  [risk:low] [verified:v2026.2.26]
+
+# ============================================
+# MEMORY FIXES (4) — Arama ve recall
+# ============================================
+# RETIRED(v2026.3.7): 24727 | fix(memory): qmd busy_timeout contention  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 12760 | fix(memory-flush): fire on every compaction cycle  [risk:medium] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 14005 | fix(memory): bm25RankToScore constant 1.0 for negative ranks  [risk:medium] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 25409 | fix(memory): cap hybrid minScore at textWeight preserve BM25-only matches  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+
+# ============================================
+# CONFIG/ENV FIXES (10) — Yapilandirma ve ortam
+# ============================================
+# RETIRED(v2026.3.28): upstream closed — 19129 | fix(config): block destructive config writes  [risk:low] [verified:v2026.2.26]
+16987 | fix(config): skipCache sessionStore prevent lost updates  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 18193 | fix: default elevatedDefault to 'off' instead of 'on'  [risk:medium] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# DISABLED(2026-03-19): 24379 | fix(config): preserve env var refs during gateway startup config writes  [risk:high] [verified:v2026.2.26] -- PR closed upstream, manual patch still fails on current base
+# RETIRED(v2026.3.7): 24805 | fix(usage): include archived deleted transcripts in usage-cost totals  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+24840a | fix(config): redact env.vars with register(sensitive)  [risk:high] [verified:v2026.2.26]
+24840c | fix(cli): rename --url to --cookie-url in cookies set  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-03): 22929 | fix: NODE_EXTRA_CA_CERTS missing from LaunchAgent on macOS — SUPERSEDED by #27915 (NODE_EXTRA_CA_CERTS via rebased PR)
+# RETIRED(v2026.3.7): 24008 | fix(config): strip unknown keys instead of dropping entire section  [risk:high] [verified:v2026.2.26] — PR DELETED (fix still needed, rewrite as standalone)
+# RETIRED(2026-03-09): 27044 | fix(net): allow network config overrides for pinned dispatchers — CLOSED, v2026.3.8 has CreatePinnedDispatcherOptions upstream
+# RETIRED(2026-03-09): 28428 | fix(gateway): stop embedding token in daemon service env to prevent post-rotation drift — LANDED upstream as contributor PR in v2026.3.7
+# RETIRED(2026-03-02): 28291 | fix(daemon): forward NODE_EXTRA_CA_CERTS — PARTIALLY UPSTREAM in v2026.3.1 (NODE_USE_SYSTEM_CA not needed)
+
+# ============================================
+# BUG/STABILITY FIXES (34) — Genel duzeltmeler
+# ============================================
+# RETIRED(v2026.3.23): 24614 | fix: models.list allowlist respect  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 24039 | fix(logging): local time in console timestamps  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 24732 | fix(acp): flush delta text on final chat event  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 22475 | fix(logging): correct levelToMinLevel mapping to match tslog  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 19177 | fix: use parseAgentSessionKey instead of fragile split  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-02): 22711 | fix: post-compaction audit skips non-existent files — TARGET REMOVED in v2026.3.1
+# RETIRED(v2026.3.7): 21615 | fix(tui): preserve main session model during heartbeat override  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 12191 | fix: guard undefined model.input in display and scan  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(2026-03-03): 22424 | fix: prevent crash when onUpdate is truthy but not callable — SUPERSEDED (maintainer: 'no code path triggers it')
+# RETIRED(2026-03-02): 17375 | fix(session): stale model in reset welcome — SUPERSEDED by v2026.3.1 fresh model resolution
+19996 | fix(plugins): bind logger methods to preserve this context  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 24764 | fix(failover): classify subscription/plan unavailability as billing  [risk:high] [verified:v2026.2.26]
+20990 | fix: handle single-element type arrays in tryFlattenLiteralAnyOf  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 16963 | fix: enable auth rate limiting by default  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 19406 | fix(heartbeat): filter error payloads from heartbeat reply selection  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 14023 | fix: filter skills watcher to relevant file types prevent FD exhaustion  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 17950 | fix: filter error payloads from user-facing messages  [risk:medium] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 16894 | fix: truncation splitting surrogate pairs in subagents/web-fetch  [risk:high] [verified:v2026.2.26]
+25134 | fix: prevent echo loop by coercing isFromMe strings  [risk:low] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 25092 | fix(hooks): enforce allowedAgentIds for omitted agentId  [risk:low] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(2026-03-02): 25416 | fix(cron): drain pending writes before reading run log  [risk:low] [merged:v2026.3.1]
+# RETIRED(2026-03-09): 25219 | fix(agent): prevent gateway hang on streaming fetch errors — cherry-picked upstream via commit a4a52755
+# RETIRED(2026-03-03): 26565 | fix(cron): normalize jobId to id in store loader to prevent stuck jobs — SUPERSEDED by #28889 (jobId normalization merged)
+25818 | fix: log rotation for /tmp/openclaw gateway logs  [risk:high] [verified:v2026.2.26]
+10197 | fix: add missing allowAgents to agent defaults subagents schema  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 19407 | fix(agents): strip thinking blocks on cross-provider model switch  [risk:high] [verified:v2026.2.26]
+18230 | fix(sessions): repair lone surrogates in session history  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-02): 21896 | fix(cron): disable messaging tool when delivery.mode is none  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.7): 23525 | fix: include sessionKey in session_start/session_end hook context  [risk:high] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 25702 | fix(archive): reject symlink tar extraction roots  [risk:high] [verified:v2026.2.26] — CLOSED/MERGED upstream
+27477 | fix: normalize edit aliases and stabilize mutation fingerprint  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-02): 19077 | fix(agents): trigger model failover on connection-refused and network-unreachable errors  [risk:medium] [verified:v2026.2.26]
+27388 | fix(agent): retry on Anthropic stream event order errors  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 23672 | fix(resilience): guard JSON.parse of external process output with try-catch  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 20185 | fix(model): recognize default/reset/clear keywords to clear session model override  [risk:high] [verified:v2026.2.26]
+# RETIRED(2026-03-09): 26602 | fix: clean orphaned session lock files on in-process restart — author closed: "needs rethinking given session isolation changes in v2026.3.7"
+23777 | fix(delivery): move permanently failed entries out of retry queue  [risk:high] [verified:v2026.3.1]
+# RETIRED(v2026.3.7): 28514 | fix(agents): enforce Mistral strict9 tool call ID sanitization via OpenAI compat  [risk:high] [verified:v2026.2.26] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 28572 | fix(memory): allow FTS-only indexing without embedding provider  [risk:high] [verified:v2026.2.26]
+# RETIRED(v2026.3.23): 17823 | fix: memory leak in cron isolated runs — agent-events Maps never cleaned  [risk:high] [verified:v2026.2.26]
+
+# ============================================
+# PLATFORM-SPECIFIC FIXES (1 active + 2 retired) — macOS/self-hosted
+# ============================================
+# RETIRED(2026-03-03): FIX-A1 | TLS probe fingerprint — MERGED in v2026.3.1 dist (probeGateway already accepts tlsFingerprint)
+FIX-A2 | fix(discord): catch ResilientGatewayPlugin maxAttempts=0 uncaught exception  [risk:critical] [verified:v2026.2.26]
+# DISABLED(34580-disabled): FIX-C1 | fix(gateway-tool): add missing imports for canonicalizeMainSessionAlias + resolveAgentIdFromSessionKey after PR 34580  [risk:low] [verified:v2026.3.23]
+# RETIRED(2026-03-03): FIX-A3 | accept self-signed cert for wss — MERGED in v2026.3.1 dist
+
+# ============================================
+# DISABLED (1) — Bilinen sorunlu, fix bekliyor
+# ============================================
+# DISABLED: 28258 — wrapAsyncIterableWithRecovery strips response.result() → crash-loop (agent-loop.js:187)  [risk:critical]
+# Needs fix: proxy .result() from original stream before re-enabling
+
+# ============================================
+# REMOVED / RETIRED / SKIPPED / DEFERRED
+# ============================================
+# REMOVED: 20533 — closed upstream in v2026.2.24
+# REMOVED: 22022 — senderIsOwner already in base v2026.2.23 (causes TS duplicate identifier)
+# REMOVED: 21516 — closed upstream in v2026.2.24
+# REMOVED: 20867 — closed upstream in v2026.2.24
+# REMOVED: 24571 — merged upstream 2026-02-25
+# REMOVED: 24164 — cosmetic label change, zero functional impact (stability audit 2026-02-26)
+# REMOVED: 22741 — DashScope/Qwen fix already in base v2026.2.23
+# REMOVED: 11160 — audio MIME mappings unused, trivial impact (stability audit 2026-02-26)
+# REMOVED: 24300 — closed upstream
+# REMOVED: 12499 — closed upstream
+# REMOVED: 12792 — closed upstream
+# REMOVED: 24806 — merged upstream as #25803 in v2026.2.24
+# REMOVED: 23974 — merged upstream
+# REMOVED: 21735 — merged upstream as #25485 in v2026.2.24
+# REMOVED: 24969 — merged upstream in v2026.2.24
+# REMOVED: 25289 — closed, superseded by #24969
+# REMOVED: 24840-B network failover — new logic in errors.ts hot path, risky (stability audit 2026-02-26)
+# REMOVED: 24517 — feature not bugfix, core pi-tools path risk, never applied (stability audit 2026-02-26)
+# REMOVED: 26502 — merged upstream in v2026.2.26
+# REMOVED: 26529 — merged upstream in v2026.2.26
+# REMOVED: 27021 — upstream v2026.2.26 has 60s TTL + startGuard (typing.ts refactored)
+# REMOVED: 26999 — upstream v2026.2.26 has closed/sealed/startGuard race protection
+# REMOVED: EXP-1 — Grammy already handles update_id dedup, false positive risk (stability audit 2026-02-26)
+# REMOVED: EXP-2 — redundant with #25966 + #25973 + #25093 (stability audit 2026-02-26)
+# REMOVED: EXP-3 — redundant with #26626 + #26441 + #27013, 500 lines on startup path (stability audit 2026-02-26)
+# REMOVED: EXP-4 — dead code, no channel uses it, YAGNI (stability audit 2026-02-26)
+# SKIPPED: 26443 (PID recycling — container only)
+# SKIPPED: 26047 (LINE webhook dedupe — unused channel, superseded by EXP-1)
+# SKIPPED: 26918 (IRC monitor — unused channel, superseded by EXP-4)
+# SKIPPED: 24958 (RubberBand — XL, high maintenance risk)
+# SKIPPED: 11746 — meta.lastTouchedAt no-op already in BASE_RELOAD_RULES_TAIL (v2026.2.24)
+# SKIPPED: 21622 — already in base v2026.2.24 (READ_SCOPE+WRITE_SCOPE in CLI_DEFAULT_OPERATOR_SCOPES)
+# SKIPPED: 22583 — already in base v2026.2.24 (operator.admin satisfies all operator.* scopes)
+# SKIPPED: 25988 — merged in v2026.2.25
+# SKIPPED: 27593 — superseded in v2026.2.26-beta.1 (typing cross-channel umbrella)
+# DEFERRED: 8390 — feature (fallback model notify), lower priority
+# DEFERRED: 20622 — feature (typing TTL config), lower priority
+# 28238 | DUPLICATE of #25966 — cap pending pre-auth websocket handshakes (already patched)
+
+# ── NIGHTLY SCAN BATCH (2026-03-03) ────────────────────────────────
+# Added from nightly-scan + manual triage. All verified on v2026.3.2 sandbox.
+# RETIRED(v2026.3.7): 31890 | fix(agents): prevent and recover from tool_use_id transcript corruption  [risk:low] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 29533 | fix(agents): add SSE parse error resilience with auto-retry  [risk:medium] [verified:v2026.3.2]
+29937 | fix: improve subagent result reliability (timeout aggregation, fallback lifecycle, thinking extraction)  [risk:medium] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 28736 | fix(acp): resolve fleet agent IDs to acpx-compatible names before dispatch  [risk:medium] [verified:v2026.3.2] — CLOSED/MERGED upstream
+32267 | fix(memory): Don't fallback to builtin when QMD is explicitly configured  [risk:medium] [verified:v2026.3.2]
+# DISABLED(v2026.3.23): 31876 | fix: don't auto-promote reasoning_effort for openrouter/auto; add ThinkLevel "auto"  [risk:high] [verified:v2026.3.2] -- script targets old file paths, partial apply breaks TS build
+# RETIRED(v2026.3.23): 27563 | fix(sandbox): mount skills at dedicated /skills path for sandboxed agents  [risk:medium] [verified:v2026.3.2]
+26843 | Plugins: lazy-install bundled extension deps on enable + loader fallback  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 27119 | fix: pass bashElevated to runEmbeddedPiAgent in cron and agent command paths  [risk:high] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): FIX-B1 | fix(agents): strip Ollama thinking field from tool_use blocks  [risk:critical] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 26290 | fix(net): increase pinned dispatcher timeout from 300ms to 2500ms  [risk:high] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 27866 | Telegram: honor NO_PROXY and env proxy precedence  [risk:high] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.28-audit): 30999 | feat(typing): gateway-level TTL coordinator as backstop for stuck typing indicators  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 31918 | fix: improve prompt caching by stabilizing identity prefix  [risk:medium] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.7): 32350 | Gateway: periodically recover pending outbound deliveries  [risk:medium] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 30853 | hooks: unify internal + plugin hook registries to fix 5 systemic bugs  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 31791 | fix(sessions): guarantee lock release when teardown throws  [risk:low] [verified:v2026.3.2] — CLOSED/MERGED upstream
+31909 | fix(agents): ensure parallel tool results have correct parentId  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.23): 32265 | fix(agents): prevent subagent timeout from leaking tool results to chat  [risk:medium] [verified:v2026.3.2]
+31031 | fix(memory): change default QMD searchMode from 'search' to 'query'  [risk:low] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 31037 | fix: reduce chat token usage by excluding MEMORY.md from bootstrap context  [risk:low] [verified:v2026.3.2] — CLOSED/MERGED upstream
+31042 | fix(tui): prevent /compact from crashing terminal session  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.28-audit): 31056 | fix: auto auth profile override should not bias profile ordering  [risk:medium] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 27635 | fix(agents): make compaction timeout configurable  [risk:high] [verified:v2026.3.2] — CLOSED/MERGED upstream
+# RETIRED(v2026.3.23): 26282 | fix(telegram): reject oversized files before download  [risk:high] [verified:v2026.3.2]
+# RETIRED(v2026.3.7): 31991 | fix(telegram): use HTML-aware chunker for delivery queue outbound  [risk:high] [verified:v2026.3.2] — CLOSED/MERGED upstream
+
+# ── Auto-added: 2026-03-04 (score >= 85, apply-check passed) ──────────────
+# RETIRED(v2026.3.7): 33410 | bugfix: fix(restart): poll port free after SIGKILL to prevent EADDRINUSE restart loop # AUTO-ADDED 2026-03-04 score=85 — CLOSED/MERGED upstream
+33149 | bugfix: Gateway: fix restart-loop by terminating wss clients before close and triggering supervisor restart on Linux [exclude-changelog+test] # AUTO-ADDED 2026-03-04 score=85
+# RETIRED(v2026.3.7): 33494 | bugfix: fix(discord): disable carbon listener timeout to prevent stuck health-monitor cycle # AUTO-ADDED 2026-03-04 score=85 — CLOSED/MERGED upstream
+33434 | bugfix: fix(telegram): add setStatus integration for health monitoring # AUTO-ADDED 2026-03-04 score=85
+
+# ── Auto-added: 2026-03-05 (score >= 85, apply-check passed) ──────────────
+# RETIRED(v2026.3.7): 34869 | bugfix: Cron: recompute expired nextRunAtMs for non-running jobs on timer tick # AUTO-ADDED 2026-03-05 score=90 — CLOSED/MERGED upstream
+35114 | bugfix: fix: validate tailscale/bind compatibility at config-write time [exclude-test] # AUTO-ADDED 2026-03-05 score=85
+# DISABLED(v2026.3.23-build-break): 34580 | bugfix: fix: restore agent resume after self-triggered gateway restart # AUTO-ADDED 2026-03-05 score=85
+
+# -- Auto-added: 2026-03-09 (manual scan, apply-check passed on v2026.3.7) --------
+32580 | bugfix: fix(gateway): scope chat event broadcasts to session-associated clients # ADDED 2026-03-09 score=90
+# RETIRED(v2026.3.23): 38320 | bugfix: fix(agents): repair structurally complete interrupted tool calls # ADDED 2026-03-09 score=90
+39059 | security: Security: harden gateway timeouts and auth store sealing [exclude-changelog+test] # ADDED 2026-03-09 score=84
+28842 | bugfix: fix: prevent duplicate gateway when lock owner status is unknown # ADDED 2026-03-09 score=84
+# RETIRED(v2026.3.23): 34980 | bugfix: fix: guard against malformed tool result text blocks crashing context truncation # ADDED 2026-03-09 score=84
+# RETIRED(2026-03-09): 34620 | bugfix: fix(agents): disable pi-coding-agent auto-retry to unblock 529 failover — CLOSED upstream (not merged)
+# RETIRED(2026-03-12): 36537 | feature: feat: add sessions_yield tool for cooperative turn-ending # ADDED 2026-03-09 score=84
+
+# ── Auto-added: 2026-03-09 (score >= 85, apply-check passed) ──────────────
+40413 | bugfix: fix(discord): persist hello-stall counter and add escalation across health-monitor restarts # AUTO-ADDED 2026-03-09 score=92
+# RETIRED(2026-03-10): 40324 | bugfix: fix(agents): bound compaction retry wait and drain embedded runs on restart # AUTO-ADDED 2026-03-09 score=92
+# RETIRED(2026-03-09): 40098 | bugfix: fix(telegram): add download timeout to prevent polling loop hang # AUTO-ADDED 2026-03-09 score=90
+# RETIRED(v2026.3.28): upstream closed — 39363 | bugfix: fix(voice-call): defer initial TTS until media stream connects # AUTO-ADDED 2026-03-09 score=86
+40080 | bugfix: fix(irc): prevent 433 nick-collision by reusing the monitor's live connection # AUTO-ADDED 2026-03-09 score=85
+# RETIRED(v2026.3.23): 39460 | bugfix: fix(agents): detect codex sandbox-denied runs that exit 0 as failures # AUTO-ADDED 2026-03-09 score=85
+39919 | bugfix: fix: strip thinking/redacted_thinking blocks from non-latest assistant messages for Anthropic # AUTO-ADDED 2026-03-09 score=85
+
+# ─── NEW: 2026-03-10 batch (cognitive scheduler review) ──────────────────
+# DISABLED(2026-03-19): 36588 | fix: suppress undici TLS session null-deref as transient uncaughtException  [risk:medium] [verified:v2026.3.8] # ADDED 2026-03-10 score=91 -- PR closed upstream, manual patch fails on current base
+# DISABLED(2026-03-19): 39117 | fix: recover busy sessions and improve queued handling  [risk:medium] [verified:v2026.3.8] # ADDED 2026-03-10 score=90 -- v2026.3.2 build break: command-queue.ts patch references queueState.lanes but base file uses lanes
+# DISABLED(2026-03-19): 36486 | fix(agents): prevent channel-bound A2A announce leakage  [risk:medium] [verified:v2026.3.8] # ADDED 2026-03-10 score=91 -- v2026.3.2 build break: sessions-send-tool.a2a.ts partially adapted to AnnounceTargetDecision; announceTarget.to/channel/accountId remain
+# DISABLED(2026-03-19): 37568 | fix(security): redact resolved secrets from models.json  [risk:high] [verified:v2026.3.8] # ADDED 2026-03-10 score=85 -- v2026.3.2 build break: redactResolvedSecrets() expects non-optional providers but normalizeProviders() may return undefined
+38338 | fix: use safe dmScope default to prevent cross-channel reply leakage  [risk:medium] [verified:v2026.3.8] # ADDED 2026-03-10 score=85
+
+# ─── NEW: 2026-03-12 batch (cron + compaction + stability + security) ────
+# RETIRED(v2026.3.23): 26565 | fix(cron): normalize jobId → id in store loader to prevent stuck jobs  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=85
+# RETIRED(v2026.3.23): 26502 | fix: prevent double compaction from destroying preserved messages  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=85
+# RETIRED(v2026.3.23): 34869 | Cron: recompute expired nextRunAtMs for non-running jobs on timer tick  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=90
+# RETIRED(v2026.3.23): 31890 | fix(agents): prevent and recover from tool_use_id transcript corruption  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=86
+# RETIRED(v2026.3.23): 25974 | fix(discord): break resume death spiral when session goes stale  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=85
+# RETIRED(v2026.3.23): 33494 | fix(discord): disable carbon listener timeout to prevent stuck health-monitor cycle  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=85
+# RETIRED(v2026.3.23): 25219 | fix(agent): prevent gateway hang on streaming fetch errors during billing/quota failures  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=85
+# RETIRED(v2026.3.23): 28342 | feat(web-fetch): add ssrfPolicy config support for web_fetch tool  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=90
+# RETIRED(v2026.3.23): 28238 | security(gateway): cap pending pre-auth websocket handshakes  [risk:low] [verified:v2026.3.11] # ADDED 2026-03-12 score=90
+# RETIRED(v2026.3.23): 40221 | fix: suppress undici TLS session null-deref as transient uncaughtException  [risk:medium] [verified:v2026.3.13]
+28258 | fix: crash recovery for Anthropic thinking blocks (#25194)  [risk:high] [verified:v2026.3.13]
+33422 | Security hardening: operator safety guardrails (opt-in, backwards-compatible)  [risk:high] [verified:v2026.3.13]
+29245 | feat(approvals): harden telegram exec approval lifecycle and tool gating  [risk:high] [verified:v2026.3.13]
+39471 | fix(database): add WAL journal mode and transient SQLite error handling  [risk:low] [verified:v2026.3.13]
+# RETIRED(v2026.3.23): 35145 | fix(discord): catch unhandled promise rejection in gateway registerClient (#34592)  [risk:medium] [verified:v2026.3.13]
+40400 | fix(memory): harden durable memory writes  [risk:high] [verified:v2026.3.13]
+# RETIRED(v2026.3.23): 33423 | fix(cron): ensure nextRunAtMs is always after lastRunAtMs for cron jobs  [risk:low] [verified:v2026.3.13]
+30009 | feat(outbox): write-ahead outbox with recovery worker and delivery tracking  [risk:high] [verified:v2026.3.13]
+38812 | fix(agents): add safety valve for consecutive tool-only turns and API error notification  [risk:high] [verified:v2026.3.13]
+35738 | fix(daemon): detect Homebrew node@ paths on macOS  [risk:medium] [verified:v2026.3.13]
+# RETIRED(v2026.3.28): upstream closed — 33898 | feat: add compaction.onFailure policy (halt/continue/reset)  [risk:high] [verified:v2026.3.13]

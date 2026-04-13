@@ -325,7 +325,7 @@ done
 echo ""
 echo -e "  Patch results: ${GREEN}$APPLIED applied${NC}, ${RED}${#FAILED_PATCHES[@]} failed${NC}"
 if [ ${#FAILED_PATCHES[@]} -gt 0 ]; then
-  echo -e "  Failed: ${FAILED_PATCHES[*]:-}"
+  echo -e "  Failed: ${FAILED_PATCHES[*]}"
 fi
 
 # Build
@@ -383,65 +383,21 @@ mkdir -p "$VERSIONS_DIR"
 cp -R "$SANDBOX/dist" "$TARGET_DIST"
 chown -R "$(whoami):staff" "$TARGET_DIST"
 
-# Ensure dist-versions/package.json shim exists.
-# Dist code does require('../package.json'); without this shim Node's
-# findPackageRootSync walks past dist-versions/ and can latch onto the real
-# openclaw package.json (wrong version) or fail outright. The shim has a
-# different "name" so the resolver treats it as a non-matching package and
-# walks up to the real package root when needed.
-SHIM_PATH="$VERSIONS_DIR/package.json"
-if [ ! -f "$SHIM_PATH" ]; then
-  info "Creating dist-versions/package.json shim"
-  cat > "$SHIM_PATH" <<'SHIMEOF'
-{
-  "name": "openclaw-dist-versions-shim",
-  "version": "0.0.0",
-  "_comment": "Shim for require('../package.json') from code inside dist-versions/v<X>-patched/. Name differs from 'openclaw' so findPackageRootSync walks past it to the real package root."
-}
-SHIMEOF
-fi
-
 info "Atomic symlink swap..."
-# ln -sfn is atomic on macOS/BSD when target is a symlink:
-#   -f replaces the existing link, -n prevents following it into a target dir.
-# Earlier ln-tmp+mv variant was broken on macOS: mv into an existing symlink
-# resolves through the link and places the tmp link inside the old target dir
-# (e.g. dist-versions/v<X>-patched/dist-active-tmp) instead of swapping atomically.
-ln -sfn "$TARGET_DIST" "$ACTIVE_LINK"
+ln -sfn "$TARGET_DIST" "${ACTIVE_LINK}-tmp"
+mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
 ok "Swap complete: dist-active → $(basename "$TARGET_DIST")"
 
-# Update top-level package.json version to match new build so plugin
-# compatibility checks (which read require('openclaw/package.json').version)
-# see the new build version instead of the old one. Without this some
-# plugins are rejected because the resolver reports the stale version.
-if [ -f "$TARGET_DIST/build-info.json" ]; then
-  BUILT_VERSION=$(node -e "console.log(require('$TARGET_DIST/build-info.json').version)" 2>/dev/null || echo "")
-  if [ -n "$BUILT_VERSION" ]; then
-    info "Updating top-level package.json version → $BUILT_VERSION"
-    node -e "
-      const fs = require('fs');
-      const path = '$OPENCLAW_ROOT/package.json';
-      const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
-      pkg.version = '$BUILT_VERSION';
-      fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
-    " || warn "Failed to update top-level package.json version"
-  fi
-fi
-
-# Trim old versions (keep max 3).
-# Filter out package.json shim and any non-directory entries so the trim
-# counter doesn't fill its "keep 3" budget with the shim file.
-VERSION_COUNT=$(find "$VERSIONS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+# Trim old versions (keep max 3)
+VERSION_COUNT=$(ls -1 "$VERSIONS_DIR" 2>/dev/null | wc -l | tr -d ' ')
 if [ "$VERSION_COUNT" -gt 3 ]; then
   info "Trimming old versions (keeping 3)..."
-  # -t sorts by mtime desc; restrict to directories only so the shim is safe.
-  find "$VERSIONS_DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | \
-    xargs -I{} stat -f "%m %N" {} 2>/dev/null | sort -rn | tail -n +4 | \
-    awk '{print $2}' | while read -r FULL_PATH; do
+  ls -1t "$VERSIONS_DIR" | tail -n +4 | while read -r old; do
+    FULL_PATH="$VERSIONS_DIR/$old"
     # Never delete the active version
     if [ "$(readlink "$ACTIVE_LINK")" != "$FULL_PATH" ]; then
       rm -rf "$FULL_PATH"
-      info "Removed: $(basename "$FULL_PATH")"
+      info "Removed: $old"
     fi
   done
 fi
@@ -451,18 +407,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 step "Phase 5: Health Probe"
 
-# Resolve rollback target: any existing versioned dir in $VERSIONS_DIR
-# other than the one we just installed. Exclude non-directories (e.g. the
-# package.json shim) and the current target. On a first upgrade this will be
-# empty, in which case Phase 5 below emits a clear "no rollback target" msg
-# rather than silently leaving the live system broken with an empty symlink.
-PREV_ACTIVE=""
-for _candidate in $(ls -1t "$VERSIONS_DIR" 2>/dev/null); do
-  [ "$_candidate" = "$(basename "$TARGET_DIST")" ] && continue
-  [ -d "$VERSIONS_DIR/$_candidate" ] || continue
-  PREV_ACTIVE="$_candidate"
-  break
-done
+PREV_ACTIVE="$(ls -1t "$VERSIONS_DIR" | grep -v "$(basename "$TARGET_DIST")" | head -1)"
 
 info "Restarting gateway..."
 launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || \
@@ -494,17 +439,12 @@ for i in $(seq 1 12); do
 done
 
 if [ "$HEALTH_OK" = false ]; then
-  fail "Gateway failed health checks"
+  fail "Gateway failed health checks — rolling back"
   if [ -n "$PREV_ACTIVE" ]; then
-    info "Rolling back to $PREV_ACTIVE"
-    # Atomic replace — see Phase 4 note re: mv-into-symlink bug on macOS.
-    ln -sfn "$VERSIONS_DIR/$PREV_ACTIVE" "$ACTIVE_LINK"
+    ln -sfn "$VERSIONS_DIR/$PREV_ACTIVE" "${ACTIVE_LINK}-tmp"
+    mv "${ACTIVE_LINK}-tmp" "$ACTIVE_LINK"
     launchctl kickstart -k "gui/$(id -u)/ai.openclaw.gateway" 2>/dev/null || true
     warn "Rolled back to $PREV_ACTIVE"
-  else
-    fail "First upgrade — no rollback target available."
-    fail "Live system will remain on failed version v$TARGET_VERSION until manual recovery."
-    fail "Manual recovery: inspect logs, fix root cause, and re-run upgrade or restore dist/ from backup."
   fi
   EXIT_CODE=1
 else
@@ -521,14 +461,8 @@ END_TIME=$(date +%s)
 DURATION=$((END_TIME - START_TIME))
 
 # JSONL log
-# ${FAILED_PATCHES[*]:-} guards against bash 3.2 (macOS default) throwing
-# "unbound variable" under `set -u` when the array is empty.
-FAILED_PATCHES_JOINED=""
-if [ ${#FAILED_PATCHES[@]} -gt 0 ]; then
-  FAILED_PATCHES_JOINED="$(IFS='","'; echo "${FAILED_PATCHES[*]:-}")"
-fi
 LOG_ENTRY=$(cat <<LOGEOF
-{"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","action":"upgrade","from":"v$CURRENT_VERSION","target":"$TARGET_TAG","applied":$APPLIED,"failed":${#FAILED_PATCHES[@]},"merged":$PATCH_MERGED,"conflict":$PATCH_CONFLICT,"health":"$([ "$HEALTH_OK" = true ] && echo ok || echo failed)","duration_seconds":$DURATION,"failed_patches":["${FAILED_PATCHES_JOINED}"]}
+{"timestamp":"$(date -u +%Y-%m-%dT%H:%M:%SZ)","action":"upgrade","from":"v$CURRENT_VERSION","target":"$TARGET_TAG","applied":$APPLIED,"failed":${#FAILED_PATCHES[@]},"merged":$PATCH_MERGED,"conflict":$PATCH_CONFLICT,"health":"$([ "$HEALTH_OK" = true ] && echo ok || echo failed)","duration_seconds":$DURATION,"failed_patches":["$(IFS='","'; echo "${FAILED_PATCHES[*]}")"]}
 LOGEOF
 )
 echo "$LOG_ENTRY" >> "$LOG_FILE"

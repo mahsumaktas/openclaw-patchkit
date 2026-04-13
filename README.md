@@ -4,6 +4,15 @@
 
 Production-tested patch management system for OpenClaw. Provides atomic upgrades, runtime monkey-patches, and symlink-based instant rollback.
 
+## v2026.4.11 Migration Notes
+
+- Current baseline: **v2026.4.11** (was v2026.4.5)
+- All 45 PR patches temporarily disabled in `pr-patches.conf` (backup: `pr-patches.conf.pre-v4.11-backup`)
+- `FIX-A2` and `FIX-B1` scripts disabled (moved to `.disabled-v4.11` in `manual-patches/`)
+- `cognitive-memory-patch.sh` archived as stale (see `archive/cognitive-memory-patch.sh.stale-v4.11`) — bundled memory-lancedb v4.11 makes it obsolete
+- Next nightly scan will rescore new PRs against the v4.11 baseline
+- Manual re-enable: edit `pr-patches.conf`, add PR line, run `upgrade-openclaw.sh --dry-run v2026.4.11` to verify before full upgrade
+
 ## Why Patchkit?
 
 OpenClaw ships as a compiled Node.js application. Out of the box, you get whatever the release includes — bugs, limitations, and all. You wait for the next release and hope your issue is fixed.
