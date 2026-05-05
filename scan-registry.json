@@ -2,9 +2,9 @@
   "generatedAt": "2026-02-24T00:17:26.084Z",
   "baseVersion": "v2026.2.22",
   "stats": {
-    "totalOpenPRsScanned": 18908,
+    "totalOpenPRsScanned": 19007,
     "passedFilter": 3981,
-    "treliqScored": 18639,
+    "treliqScored": 18738,
     "highValue": 344,
     "applied": 56,
     "lightweightOnly": 0,
@@ -11348,6 +11348,7 @@
     49349,
     49358,
     49359,
+    49361,
     49366,
     49384,
     49385,
@@ -11609,13 +11610,16 @@
     50118,
     50124,
     50128,
+    50136,
     50141,
     50144,
     50146,
+    50147,
     50148,
     50150,
     50152,
     50159,
+    50160,
     50163,
     50168,
     50171,
@@ -11626,11 +11630,14 @@
     50183,
     50188,
     50189,
+    50191,
     50193,
     50200,
     50206,
+    50210,
     50214,
     50215,
+    50217,
     50218,
     50221,
     50226,
@@ -11808,8 +11815,10 @@
     50743,
     50745,
     50746,
+    50751,
     50754,
     50755,
+    50760,
     50761,
     50767,
     50774,
@@ -12015,6 +12024,7 @@
     51380,
     51381,
     51384,
+    51388,
     51389,
     51399,
     51407,
@@ -12237,7 +12247,10 @@
     52016,
     52017,
     52021,
+    52025,
     52026,
+    52027,
+    52036,
     52038,
     52042,
     52050,
@@ -12245,6 +12258,7 @@
     52053,
     52055,
     52057,
+    52059,
     52060,
     52063,
     52065,
@@ -12606,6 +12620,7 @@
     53369,
     53371,
     53373,
+    53393,
     53395,
     53400,
     53410,
@@ -13373,6 +13388,7 @@
     56101,
     56103,
     56107,
+    56116,
     56119,
     56130,
     56133,
@@ -18649,6 +18665,7 @@
     74411,
     74412,
     74418,
+    74425,
     74427,
     74432,
     74433,
@@ -18710,7 +18727,9 @@
     74946,
     74950,
     74970,
+    75030,
     75033,
+    75035,
     75046,
     75065,
     75075,
@@ -18723,6 +18742,7 @@
     75095,
     75097,
     75101,
+    75118,
     75120,
     75121,
     75135,
@@ -18737,6 +18757,7 @@
     75181,
     75183,
     75185,
+    75218,
     75225,
     75228,
     75256,
@@ -18788,7 +18809,9 @@
     75590,
     75592,
     75600,
+    75605,
     75609,
+    75612,
     75629,
     75630,
     75637,
@@ -18798,11 +18821,14 @@
     75661,
     75662,
     75672,
+    75722,
     75727,
     75732,
     75754,
     75755,
     75761,
+    75773,
+    75776,
     75781,
     75807,
     75819,
@@ -18875,17 +18901,22 @@
     76495,
     76657,
     76739,
+    76775,
+    76811,
     76819,
     76820,
     76832,
     76845,
     76851,
     76854,
+    76873,
     76908,
     76914,
     76920,
     76921,
+    76922,
     76923,
+    76928,
     76936,
     76941,
     76943,
@@ -18919,7 +18950,75 @@
     77028,
     77030,
     77032,
-    77035
+    77035,
+    77157,
+    77184,
+    77187,
+    77189,
+    77191,
+    77197,
+    77215,
+    77236,
+    77237,
+    77238,
+    77304,
+    77325,
+    77361,
+    77367,
+    77372,
+    77376,
+    77385,
+    77399,
+    77420,
+    77425,
+    77427,
+    77432,
+    77442,
+    77445,
+    77454,
+    77456,
+    77462,
+    77466,
+    77473,
+    77477,
+    77479,
+    77486,
+    77488,
+    77490,
+    77492,
+    77507,
+    77523,
+    77524,
+    77527,
+    77533,
+    77537,
+    77538,
+    77539,
+    77540,
+    77542,
+    77544,
+    77549,
+    77550,
+    77552,
+    77553,
+    77556,
+    77558,
+    77559,
+    77560,
+    77580,
+    77583,
+    77590,
+    77593,
+    77597,
+    77602,
+    77607,
+    77611,
+    77614,
+    77615,
+    77617,
+    77619,
+    77621,
+    77622
   ],
   "scoredPRs": {
     "1943": {
@@ -98122,6 +98221,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-19T02:05:59.031Z"
     },
+    "49361": {
+      "score": 40,
+      "intent": "bugfix",
+      "title": "fix(googlechat): use agent identity.name in typing indicator fallback chain",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "49366": {
       "score": 63,
       "intent": "bugfix",
@@ -99949,6 +100055,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-19T02:05:59.030Z"
     },
+    "50136": {
+      "score": 47,
+      "intent": "bugfix",
+      "title": "fix(windows): stabilize gateway restart and avoid false stale cleanup [AI-assisted]",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "50141": {
       "score": 51,
       "intent": "bugfix",
@@ -99969,6 +100082,13 @@
       "title": "feat(android): add sms.search support with policy, tests, and UX cleanup",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-22T02:05:05.955Z"
+    },
+    "50147": {
+      "score": 40,
+      "intent": "bugfix",
+      "title": "fix: prevent interrupt mode from replaying previous assistant reply",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "50148": {
       "score": 63,
@@ -99997,6 +100117,13 @@
       "title": "fix: add path existence check for config set command",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-29T02:06:14.419Z"
+    },
+    "50160": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix: throw error on Discord delivery failure instead of returning unknown",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "50163": {
       "score": 51,
@@ -100068,6 +100195,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-20T02:04:52.476Z"
     },
+    "50191": {
+      "score": 53,
+      "intent": "feature",
+      "title": "Improve native command overflow warnings to mention nativeSkills config",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "50193": {
       "score": 48,
       "intent": "feature",
@@ -100089,6 +100223,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-03T02:02:28.251Z"
     },
+    "50210": {
+      "score": 49,
+      "intent": "bugfix",
+      "title": "fix(gateway): use default agent model for session defaults",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "50214": {
       "score": 41,
       "intent": "bugfix",
@@ -100102,6 +100243,13 @@
       "title": "fix(gateway): wire agents.defaults.mediaMaxMb to inbound attachment size limit",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-20T02:04:52.476Z"
+    },
+    "50217": {
+      "score": 49,
+      "intent": "bugfix",
+      "title": "fix(auth): persist final auth profile after successful fallback",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "50218": {
       "score": 54,
@@ -101342,6 +101490,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-20T02:04:52.474Z"
     },
+    "50751": {
+      "score": 37,
+      "intent": "bugfix",
+      "title": "fix(cli): resolve gateway host from bind mode and surface auth hint on silent disconnect",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "50754": {
       "score": 44,
       "intent": "feature",
@@ -101355,6 +101510,13 @@
       "title": "feat: per-agent session maintenance config overrides",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-24T02:04:39.292Z"
+    },
+    "50760": {
+      "score": 49,
+      "intent": "feature",
+      "title": "Add Task Board phase 1 control-ui slice",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "50761": {
       "score": 58,
@@ -102790,6 +102952,13 @@
       "title": "fix(config): prevent synthetic raw content in redaction fallback",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-22T02:05:05.956Z"
+    },
+    "51388": {
+      "score": 47,
+      "intent": "bugfix",
+      "title": "fix(tool-policy): include alsoAllow entries in plugin tool allowlist …",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "51389": {
       "score": 50,
@@ -104345,12 +104514,33 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-04-09T02:06:22.898Z"
     },
+    "52025": {
+      "score": 63,
+      "intent": "bugfix",
+      "title": "fix(ui): render tool result images inline in chat",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "52026": {
       "score": 47,
       "intent": "bugfix",
       "title": "fix(reply): wait for dispatcher idle before followups",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-01T02:04:46.872Z"
+    },
+    "52027": {
+      "score": 47,
+      "intent": "bugfix",
+      "title": "fix(gateway): preserve cron list responses across close race",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "52036": {
+      "score": 66,
+      "intent": "bugfix",
+      "title": "fix: serialize concurrent appendMessage calls to prevent synthetic flush race",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "52038": {
       "score": 30,
@@ -104400,6 +104590,13 @@
       "title": "fix(browser): add explicit enabled check to status endpoint",
       "method": "sonnet-4.6",
       "scoredAt": "2026-04-25T02:03:43.767Z"
+    },
+    "52059": {
+      "score": 44,
+      "intent": "feature",
+      "title": "feat(gateway): add gateway.auth.scopes for device-less token/password connections",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "52060": {
       "score": 57,
@@ -106927,6 +107124,13 @@
       "title": "test(release): require control-ui assets in npm pack",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-25T02:02:15.497Z"
+    },
+    "53393": {
+      "score": 55,
+      "intent": "refactor",
+      "title": "refactor(gateway): unify config-derived cache invalidation on hot reload",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "53395": {
       "score": 49,
@@ -112296,6 +112500,13 @@
       "title": "fix(agents): thread external fallback context into embedded runner failover gate",
       "method": "sonnet-4.6",
       "scoredAt": "2026-03-28T02:05:00.424Z"
+    },
+    "56116": {
+      "score": 50,
+      "intent": "feature",
+      "title": "Improve Feishu streaming visibility and filter scratchpad text",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "56119": {
       "score": 54,
@@ -149229,6 +149440,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-04-30T02:04:19.272Z"
     },
+    "74425": {
+      "score": 70,
+      "intent": "bugfix",
+      "title": "fix: ensure CLI processes exit after command completion on Windows",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "74427": {
       "score": 51,
       "intent": "bugfix",
@@ -149656,12 +149874,26 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-02T02:04:32.449Z"
     },
+    "75030": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(auth): explain masked oauth profiles",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "75033": {
       "score": 24,
       "intent": "bugfix",
       "title": "fix(logging): redact http client secrets",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-03T02:02:28.252Z"
+    },
+    "75035": {
+      "score": 62,
+      "intent": "feature",
+      "title": "feat: add user input blocking lifecycle gates",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "75046": {
       "score": 56,
@@ -149746,6 +149978,13 @@
       "title": "feat(security/exec): add tools.exec.denyPathPatterns hard-deny gate",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-01T02:04:46.871Z"
+    },
+    "75118": {
+      "score": 30,
+      "intent": "feature",
+      "title": "feat(mcp): opt-in injectCallerContext for bundle MCP remote servers",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "75120": {
       "score": 68,
@@ -149844,6 +150083,13 @@
       "title": "fix(telegram): keep no-visible DMs silent",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-01T02:04:46.871Z"
+    },
+    "75218": {
+      "score": 25,
+      "intent": "feature",
+      "title": "feat(web-fetch): add Tavily as a native `web_fetch` provider",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "75225": {
       "score": 25,
@@ -150202,12 +150448,26 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-02T02:04:32.450Z"
     },
+    "75605": {
+      "score": 30,
+      "intent": "feature",
+      "title": "[plugin sdk] Derive tool target paths for hooks",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "75609": {
       "score": 30,
       "intent": "feature",
       "title": "[plugin sdk] Project session extension slots",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-02T02:04:32.450Z"
+    },
+    "75612": {
+      "score": 57,
+      "intent": "feature",
+      "title": "[plugin sdk] Add advanced workflow fixture coverage",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "75629": {
       "score": 30,
@@ -150272,6 +150532,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-02T02:04:32.449Z"
     },
+    "75722": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(memory): enforce wiki session visibility",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "75727": {
       "score": 51,
       "intent": "bugfix",
@@ -150306,6 +150573,20 @@
       "title": "fix(active-memory): fast-fail stalled recall paths",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-02T02:04:32.449Z"
+    },
+    "75773": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(whatsapp): route opening-phase Baileys 428 through reconnect policy and lock in post-open retry",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "75776": {
+      "score": 62,
+      "intent": "feature",
+      "title": "Harden main webchat reliability",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "75781": {
       "score": 71,
@@ -150811,6 +151092,20 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-04T02:04:24.873Z"
     },
+    "76775": {
+      "score": 29,
+      "intent": "feature",
+      "title": "feat(acpx): add args support for agent command overrides",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "76811": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(plugins): supplement ClawHub artifact metadata",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "76819": {
       "score": 72,
       "intent": "bugfix",
@@ -150853,6 +151148,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-04T02:04:24.872Z"
     },
+    "76873": {
+      "score": 68,
+      "intent": "bugfix",
+      "title": "fix(discord): preserve target intent during normalization",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "76908": {
       "score": 31,
       "intent": "bugfix",
@@ -150881,12 +151183,26 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-04T02:04:24.872Z"
     },
+    "76922": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(cli): exit after hooks inspection output",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
     "76923": {
       "score": 67,
       "intent": "bugfix",
       "title": "fix(gateway): add safe restart coordinator",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-04T02:04:24.872Z"
+    },
+    "76928": {
+      "score": 67,
+      "intent": "feature",
+      "title": "feat(plugins): let hooks prefer auth profiles",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     },
     "76936": {
       "score": 31,
@@ -151125,6 +151441,482 @@
       "title": "feat(gateway): add diagnostics.pricing method for pricing cache visibility",
       "method": "sonnet-4.6",
       "scoredAt": "2026-05-04T02:04:24.872Z"
+    },
+    "77157": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(telegram): recover sticky fetch fallback after transient failures",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77184": {
+      "score": 68,
+      "intent": "feature",
+      "title": "feat(plugin-sdk): re-export StatusSummary, SessionStatus, and HeartbeatStatus from command-status",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77187": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "Fix/sessions list resolver cache",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77189": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(gateway/ws): downgrade expected 1013 'gateway starting' close-before-connect to debug",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77191": {
+      "score": 68,
+      "intent": "feature",
+      "title": "feat(cron): add optional agentId filter to cron.list",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77197": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(media/image): surface sharp-install hint when optimizer exhausts every resize attempt",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77215": {
+      "score": 63,
+      "intent": "docs",
+      "title": "docs(providers/openai): note OpenAI Realtime requires Platform credits, not Codex/ChatGPT subscription",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77236": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(telegram): honor agents.list[].reasoningDefault and agents.defaults.reasoningDefault",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77237": {
+      "score": 66,
+      "intent": "feature",
+      "title": "Preserve npm plugin root when install validation blocks update",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77238": {
+      "score": 59,
+      "intent": "bugfix",
+      "title": "fix(media): ship sharp for packaged image ops",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77304": {
+      "score": 29,
+      "intent": "feature",
+      "title": "codex: show window duration (5h, 1w) instead of Primary/Secondary",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77325": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(auto-reply): deliver text-prefix slash command replies visibly in groups (#77260)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77361": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(barnacle): resync candidate labels on ready_for_review, remove stale labels",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77367": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(discord): scope command-deploy cache by application id",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.961Z"
+    },
+    "77372": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(codex/app-server): forward workspace bootstrap into developerInstructions",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77376": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(sessions): gate command:new hook emission on emitCommandHooks param in sessions.create (#76957)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77385": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix(agents): clear stale CLI session binding for all FailoverError reasons (#77089)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77399": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(acp): expose listSessions for SDK v0.16+ dispatcher (#48279)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77420": {
+      "score": 69,
+      "intent": "bugfix",
+      "title": "fix(bluebubbles): handle helper disconnects and self-chat echoes",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77425": {
+      "score": 19,
+      "intent": "bugfix",
+      "title": "fix(clawdock): use host-published OPENCLAW_GATEWAY_PORT in clawdock-dashboard URL",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77427": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix: preserve gateway install env sources",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77432": {
+      "score": 31,
+      "intent": "feature",
+      "title": "feat(doctor): warn about hidden provider catalog models",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77442": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(session): persist delivery context for inbound non-direct sessions",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77445": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(agents): persist delivered assistant text [AI]",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77454": {
+      "score": 69,
+      "intent": "bugfix",
+      "title": "fix(codex): stop idle aborts after turn activity",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77456": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "Fix diffs viewer TTL config",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77462": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(gateway/config): respond with persisted disk config in config.set/patch/apply (#77455)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77466": {
+      "score": 27,
+      "intent": "feature",
+      "title": "Guard coordination-only agent-exec from plugin/provider loading",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77473": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(browser): extend existing-session status probe",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77477": {
+      "score": 24,
+      "intent": "bugfix",
+      "title": "fix(doctor): discover load-path plugin contracts",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77479": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(media): allow aws-sdk auth for image runtime",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77486": {
+      "score": 70,
+      "intent": "bugfix",
+      "title": "fix(config): return persisted config from writes",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77488": {
+      "score": 68,
+      "intent": "feature",
+      "title": "Harden config backup restore permissions",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77490": {
+      "score": 24,
+      "intent": "feature",
+      "title": "feat(openrouter): add inbound audio STT support",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77492": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "security fix(gateway): defend pre-auth device-signature verify against CPU DoS",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77507": {
+      "score": 67,
+      "intent": "bugfix",
+      "title": "fix(gateway): route transcript reads through claude-cli store for CLI sessions [AI]",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77523": {
+      "score": 24,
+      "intent": "bugfix",
+      "title": "fix(providers/minimax): add refreshOAuth to minimax-portal so tokens auto-refresh",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77524": {
+      "score": 52,
+      "intent": "bugfix",
+      "title": "fix(runtime): abort repeated schema validation loops",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77527": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(gateway): rate-limit pre-auth bootstrap-token verify to prevent mutex DoS",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77533": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(codex): keep native hook relay alive for long turns",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77537": {
+      "score": 65,
+      "intent": "feature",
+      "title": "[codex] Render TUI commentary progress events",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77538": {
+      "score": 69,
+      "intent": "bugfix",
+      "title": "fix(gateway): bound connect frame auth.* fields at the protocol schema",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77539": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(subagent): preserve steered task text on restart redispatch",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77540": {
+      "score": 66,
+      "intent": "refactor",
+      "title": "perf(gateway): cache session, node, and cron list lookups",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77542": {
+      "score": 24,
+      "intent": "feature",
+      "title": "[codex] add gateway stall diagnostics",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77544": {
+      "score": 30,
+      "intent": "bugfix",
+      "title": "fix(plugins): repair missing openclaw peer links on update",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77549": {
+      "score": 53,
+      "intent": "feature",
+      "title": "Improve hosted Docker runtime baseline",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77550": {
+      "score": 52,
+      "intent": "bugfix",
+      "title": "fix(ui): format structured tool results instead of \"[object Object]",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77552": {
+      "score": 69,
+      "intent": "chore",
+      "title": "test(package): skip unsupported tilde baseline",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77553": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(session-status): thread runtime model override into session_status tool (#77493)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77556": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(gateway): add max reconnect limit to scheduleReconnect (#45469)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77558": {
+      "score": 61,
+      "intent": "bugfix",
+      "title": "fix(config): return persistedConfig from write handlers (config.patch / config.apply / config.set)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77559": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "[codex] Fix missing channel plugin diagnostics",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77560": {
+      "score": 31,
+      "intent": "feature",
+      "title": "feat(cron): include event timestamp in failure and auto-disabled notifications (#77497)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77580": {
+      "score": 68,
+      "intent": "feature",
+      "title": "feat(cli): list pending exec approvals (#9987)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77583": {
+      "score": 65,
+      "intent": "feature",
+      "title": "feat(cli-runner): opt-in flag to reseed from raw transcript when no compaction exists",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77590": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix(gateway): start configured generation providers",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77593": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "Fix Bedrock aws-sdk auth refresh after shared credential rotation",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77597": {
+      "score": 25,
+      "intent": "feature",
+      "title": "feat: improve Codex skill migration selection",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77602": {
+      "score": 56,
+      "intent": "feature",
+      "title": "feat(cron): add agentId filtering to cron list",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77607": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(loop-detection): emit diagnostic log lines when detection is disabled",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77611": {
+      "score": 54,
+      "intent": "bugfix",
+      "title": "Fix Telegram group delivery with stale WebChat origin",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77614": {
+      "score": 58,
+      "intent": "docs",
+      "title": "Clarify isolated Codex OAuth ownership in docs",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77615": {
+      "score": 29,
+      "intent": "feature",
+      "title": "codex: show window duration (5h, 1w) and format rate limits with usage % + reset time",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77617": {
+      "score": 31,
+      "intent": "bugfix",
+      "title": "fix: expose ollama thinking profile before activation",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
+    },
+    "77619": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(mattermost): include thread files in inbound media",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77621": {
+      "score": 71,
+      "intent": "bugfix",
+      "title": "fix(auto-reply): preserve reset inbound context",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.962Z"
+    },
+    "77622": {
+      "score": 64,
+      "intent": "feature",
+      "title": "Require real behavior proof for external PRs",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-05-05T02:03:15.963Z"
     }
   },
   "appliedPRs": [
@@ -151194,19 +151986,29 @@
     "24758": "v2026.2.22 incompatible (PR grew too large)"
   },
   "lastUpdated": "2026-02-24T03:36:31.332Z",
-  "lastScanAt": "2026-05-04T02:04:24.874Z",
+  "lastScanAt": "2026-05-05T02:03:15.964Z",
   "lastScanMethod": "sonnet-4.6-full",
   "skippedDrafts": [
-    77036,
-    77033,
-    47087,
-    77010,
+    74163,
+    77620,
+    73442,
+    77205,
+    76091,
     77018,
-    76895,
-    77006,
-    76995,
-    76757,
-    76140,
-    76927
+    77395,
+    56435,
+    55986,
+    55596,
+    54315,
+    53961,
+    74235,
+    77375,
+    77505,
+    77158,
+    77513,
+    49310,
+    76909,
+    52236,
+    76140
   ]
 }
