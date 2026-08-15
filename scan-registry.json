@@ -2,9 +2,9 @@
   "generatedAt": "2026-02-24T00:17:26.084Z",
   "baseVersion": "v2026.2.22",
   "stats": {
-    "totalOpenPRsScanned": 31782,
+    "totalOpenPRsScanned": 31864,
     "passedFilter": 3981,
-    "treliqScored": 31513,
+    "treliqScored": 31595,
     "highValue": 344,
     "applied": 56,
     "lightweightOnly": 0,
@@ -30588,6 +30588,7 @@
     118012,
     118013,
     118020,
+    118032,
     118041,
     118053,
     118055,
@@ -31245,6 +31246,7 @@
     120854,
     120855,
     120860,
+    120861,
     120881,
     120886,
     120887,
@@ -31410,6 +31412,7 @@
     121544,
     121546,
     121554,
+    121560,
     121562,
     121564,
     121567,
@@ -31568,8 +31571,11 @@
     122374,
     122386,
     122388,
+    122391,
+    122404,
     122425,
     122431,
+    122436,
     122439,
     122444,
     122457,
@@ -31664,6 +31670,7 @@
     122919,
     122920,
     122921,
+    122937,
     122984,
     122985,
     123008,
@@ -31793,7 +31800,82 @@
     123414,
     123415,
     123416,
-    123417
+    123417,
+    123482,
+    123495,
+    123535,
+    123541,
+    123546,
+    123556,
+    123562,
+    123566,
+    123572,
+    123573,
+    123575,
+    123582,
+    123585,
+    123586,
+    123588,
+    123594,
+    123597,
+    123603,
+    123613,
+    123626,
+    123645,
+    123655,
+    123656,
+    123666,
+    123676,
+    123681,
+    123682,
+    123695,
+    123702,
+    123709,
+    123720,
+    123732,
+    123737,
+    123748,
+    123786,
+    123796,
+    123803,
+    123806,
+    123812,
+    123814,
+    123818,
+    123829,
+    123830,
+    123834,
+    123837,
+    123846,
+    123847,
+    123848,
+    123851,
+    123853,
+    123855,
+    123858,
+    123860,
+    123864,
+    123866,
+    123867,
+    123870,
+    123874,
+    123875,
+    123877,
+    123893,
+    123894,
+    123898,
+    123899,
+    123905,
+    123906,
+    123907,
+    123908,
+    123911,
+    123912,
+    123919,
+    123920,
+    123921,
+    123923,
+    123924
   ],
   "scoredPRs": {
     "1943": {
@@ -245676,6 +245758,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-03T02:03:31.269Z"
     },
+    "118032": {
+      "score": 65,
+      "intent": "bugfix",
+      "title": "fix(agents): preserve model-specific reasoning defaults",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
     "118041": {
       "score": 68,
       "intent": "bugfix",
@@ -250275,6 +250364,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-11T02:06:51.415Z"
     },
+    "120861": {
+      "score": 52,
+      "intent": "bugfix",
+      "title": "fix(sandbox): bound container control-plane provisioning when engine is unresponsive",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
     "120881": {
       "score": 49,
       "intent": "bugfix",
@@ -251430,6 +251526,13 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-11T02:06:51.415Z"
     },
+    "121560": {
+      "score": 53,
+      "intent": "feature",
+      "title": "feat(gateway): recover Custodian wizard sessions after reload",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
     "121562": {
       "score": 64,
       "intent": "feature",
@@ -252536,6 +252639,20 @@
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-13T02:05:24.752Z"
     },
+    "122391": {
+      "score": 48,
+      "intent": "bugfix",
+      "title": "fix(ui): enhance UI component interaction and accessibility",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "122404": {
+      "score": 68,
+      "intent": "bugfix",
+      "title": "fix(agents): project agent identity into outbound durable delivery",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
     "122425": {
       "score": 49,
       "intent": "bugfix",
@@ -252549,6 +252666,13 @@
       "title": "fix(media): resize images before understanding",
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-13T02:05:24.752Z"
+    },
+    "122436": {
+      "score": 64,
+      "intent": "bugfix",
+      "title": "fix(cli): validate capability image --resolution at parse time",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
     },
     "122439": {
       "score": 31,
@@ -253207,6 +253331,13 @@
       "title": "fix(ci): stop repeated cold dependency rebuilds",
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-13T02:05:24.752Z"
+    },
+    "122937": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix(whatsapp): retry durable admission instead of dropping inbound messages",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
     },
     "122984": {
       "score": 55,
@@ -254117,6 +254248,531 @@
       "title": "fix(agents): hydrate override thinking catalogs through scoped live discovery",
       "method": "sonnet-4.6",
       "scoredAt": "2026-08-14T02:06:16.395Z"
+    },
+    "123482": {
+      "score": 62,
+      "intent": "bugfix",
+      "title": "fix: session list stalls while loading workspace state",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123495": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix(sessions): prevent cleanup from deleting readable transcripts",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123535": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix(ui): avoid session catalog refresh storms",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123541": {
+      "score": 74,
+      "intent": "bugfix",
+      "title": "fix(sessions): branches.list stalls the event loop for ~12s on long-lived sessions",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.673Z"
+    },
+    "123546": {
+      "score": 53,
+      "intent": "bugfix",
+      "title": "fix(agents): deliver token-limited partial replies instead of discarding them",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123556": {
+      "score": 70,
+      "intent": "feature",
+      "title": "improve(gateway): avoid Git spawn during session loading",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123562": {
+      "score": 57,
+      "intent": "feature",
+      "title": "improve(ui): unify sidebar section grammar",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123566": {
+      "score": 57,
+      "intent": "refactor",
+      "title": "refactor(ui): move session state into a trailing endcap",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123572": {
+      "score": 56,
+      "intent": "feature",
+      "title": "improve(ui): organize project and session identity in the chat header",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123573": {
+      "score": 56,
+      "intent": "feature",
+      "title": "feat(ui): clarify incognito sessions at composition time",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123575": {
+      "score": 49,
+      "intent": "bugfix",
+      "title": "fix(gateway): expose startup blockers before cutover",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123582": {
+      "score": 56,
+      "intent": "feature",
+      "title": "improve(ui): unify sidebar account footer and identity menu",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123585": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(acp): run session/new prompts in the requested cwd",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123586": {
+      "score": 55,
+      "intent": "feature",
+      "title": "improve(ui): reveal session actions without sacrificing titles",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123588": {
+      "score": 56,
+      "intent": "feature",
+      "title": "improve(ui): compact transcript selection controls",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123594": {
+      "score": 55,
+      "intent": "feature",
+      "title": "feat(ui): add consistent session information cards",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123597": {
+      "score": 57,
+      "intent": "feature",
+      "title": "improve(ui): make sidebar updates a focused call to action",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123603": {
+      "score": 55,
+      "intent": "feature",
+      "title": "improve(ui): group coding sessions by project",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123613": {
+      "score": 57,
+      "intent": "feature",
+      "title": "Unify sidebar iconography",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123626": {
+      "score": 71,
+      "intent": "refactor",
+      "title": "refactor(ui): normalize sidebar typography",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123645": {
+      "score": 56,
+      "intent": "feature",
+      "title": "feat(ui): refine sidebar Pages navigation",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123655": {
+      "score": 70,
+      "intent": "refactor",
+      "title": "refactor(ui): unify sidebar transient surfaces",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123656": {
+      "score": 57,
+      "intent": "feature",
+      "title": "feat(ui): add sidebar customization surface",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123666": {
+      "score": 58,
+      "intent": "feature",
+      "title": "feat(ui): make sidebar customization transactional",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123676": {
+      "score": 53,
+      "intent": "bugfix",
+      "title": "fix: spawned child prompt omits staged attachment file paths",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123681": {
+      "score": 59,
+      "intent": "refactor",
+      "title": "refactor(ui): unify sidebar chrome grid",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123682": {
+      "score": 58,
+      "intent": "feature",
+      "title": "improve(ui): consolidate sidebar issues into a quiet panel",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123695": {
+      "score": 66,
+      "intent": "chore",
+      "title": "chore: enforce dependency pin policy in CI",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123702": {
+      "score": 50,
+      "intent": "bugfix",
+      "title": "fix(tui): deduplicate session identity (AI-assisted)",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123709": {
+      "score": 60,
+      "intent": "feature",
+      "title": "feat(audit): explain outbound message delivery",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123720": {
+      "score": 67,
+      "intent": "bugfix",
+      "title": "fix: doctor stays silent when Windows state dir is under OneDrive",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123732": {
+      "score": 50,
+      "intent": "bugfix",
+      "title": "fix(ui): keep memory header stable across dream views",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123737": {
+      "score": 73,
+      "intent": "bugfix",
+      "title": "fix(compaction): reject summaries foregrounding superseded tasks",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123748": {
+      "score": 68,
+      "intent": "bugfix",
+      "title": "fix(discord): upload-file with a base64 buffer fails without pointing at send",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123786": {
+      "score": 48,
+      "intent": "bugfix",
+      "title": "fix(plugin-sdk): expose current inbound message context",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123796": {
+      "score": 55,
+      "intent": "feature",
+      "title": "Add Planning Knowledge retrieval plugin",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123803": {
+      "score": 40,
+      "intent": "chore",
+      "title": "chore(ui): refresh control ui locales",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123806": {
+      "score": 54,
+      "intent": "feature",
+      "title": "feat(slack): delay typing indicators for short turns",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123812": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix(audit): keep supervisor ownership marker in audit writer worker env",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123814": {
+      "score": 49,
+      "intent": "bugfix",
+      "title": "fix(gateway): prefer imported native blocks over cli-assistant aggregate",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123818": {
+      "score": 56,
+      "intent": "bugfix",
+      "title": "fix(agents): reject non-allowlisted explicit sessions_spawn models",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123829": {
+      "score": 53,
+      "intent": "bugfix",
+      "title": "fix: visible sessions explain working-directory denials",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123830": {
+      "score": 68,
+      "intent": "bugfix",
+      "title": "fix(gateway): allow workspace retry after rejected upload",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123834": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix(agents): stop yield diagnostic from being suppressed by narrated text",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123837": {
+      "score": 64,
+      "intent": "feature",
+      "title": "feat(telegram): support copy-text presentation buttons",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123846": {
+      "score": 66,
+      "intent": "bugfix",
+      "title": "fix: move raw call transcripts from system to user prompt to protect provenance",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123847": {
+      "score": 64,
+      "intent": "bugfix",
+      "title": "fix: denial gateway configuration for cron aliases",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123848": {
+      "score": 66,
+      "intent": "bugfix",
+      "title": "fix: add ssrf protection to Beam fetches",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123851": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix(slack): drop the tool-call receipt from finished progress cards",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123853": {
+      "score": 55,
+      "intent": "bugfix",
+      "title": "fix(ui): keep the open session's incognito identity through a Gateway disconnect",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123855": {
+      "score": 65,
+      "intent": "bugfix",
+      "title": "fix(memory-core): stop hammering a billing-exhausted embeddings provider every turn",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123858": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix: bound stuck code-review engines",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123860": {
+      "score": 61,
+      "intent": "chore",
+      "title": "chore(i18n): refresh native locales",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123864": {
+      "score": 57,
+      "intent": "feature",
+      "title": "feat: reject stale guarded session reset requests",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123866": {
+      "score": 67,
+      "intent": "bugfix",
+      "title": "fix(skills): repair valid skills above the reviewer read cap",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123867": {
+      "score": 63,
+      "intent": "bugfix",
+      "title": "fix: reject multi-line exec allowlist patterns; match ~ and absolute spellings on remove",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123870": {
+      "score": 48,
+      "intent": "chore",
+      "title": "test(autoreview): cover PEM regex templates",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123874": {
+      "score": 58,
+      "intent": "feature",
+      "title": "improve(ui): unify chat side rails in a tabbed panel",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123875": {
+      "score": 65,
+      "intent": "feature",
+      "title": "feat(slack): make presence event guidance configurable",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123877": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix: honor provider timeouts during stuck-session recovery",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123893": {
+      "score": 69,
+      "intent": "bugfix",
+      "title": "fix(ui): attachment close tap misses on mobile",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123894": {
+      "score": 51,
+      "intent": "bugfix",
+      "title": "fix: API-key sessions switch to OAuth after compaction",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123898": {
+      "score": 48,
+      "intent": "bugfix",
+      "title": "fix(release): restore llama-cpp plugin security scan",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123899": {
+      "score": 48,
+      "intent": "bugfix",
+      "title": "fix(session-catalog): preserve explicit agent ownership across UI and CLI",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123905": {
+      "score": 54,
+      "intent": "bugfix",
+      "title": "fix(agents): surface tombstoned main-session recovery blocks instead of failing silently",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123906": {
+      "score": 49,
+      "intent": "bugfix",
+      "title": "fix: TUI startup fails after update rewrites chunks",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123907": {
+      "score": 53,
+      "intent": "feature",
+      "title": "improve(ui): offer persistent sidebar alert dismissal",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123908": {
+      "score": 72,
+      "intent": "bugfix",
+      "title": "fix(ui): dismiss landed steer notices",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123911": {
+      "score": 65,
+      "intent": "refactor",
+      "title": "perf(ui): restore startup bundle headroom",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123912": {
+      "score": 57,
+      "intent": "feature",
+      "title": "feat(macos): add Control UI browser link preference",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123919": {
+      "score": 56,
+      "intent": "bugfix",
+      "title": "fix(gateway): allow worker bootstrap on slow uplinks",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123920": {
+      "score": 54,
+      "intent": "bugfix",
+      "title": "fix(gateway): keep supervised restarts from migrating live state",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123921": {
+      "score": 69,
+      "intent": "bugfix",
+      "title": "fix(codex): keep task lists active across compaction",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.675Z"
+    },
+    "123923": {
+      "score": 57,
+      "intent": "refactor",
+      "title": "perf(test): move direct import smoke to test fixtures",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
+    },
+    "123924": {
+      "score": 23,
+      "intent": "bugfix",
+      "title": "fix(gateway): expose exact build identity in status JSON",
+      "method": "sonnet-4.6",
+      "scoredAt": "2026-08-15T02:03:37.676Z"
     }
   },
   "appliedPRs": [
@@ -254186,52 +254842,71 @@
     "24758": "v2026.2.22 incompatible (PR grew too large)"
   },
   "lastUpdated": "2026-02-24T03:36:31.332Z",
-  "lastScanAt": "2026-08-14T02:06:16.398Z",
+  "lastScanAt": "2026-08-15T02:03:37.678Z",
   "lastScanMethod": "sonnet-4.6-full",
   "skippedDrafts": [
-    123418,
-    123401,
-    114173,
-    114098,
+    123922,
+    122394,
+    122256,
+    122396,
+    122288,
+    121894,
+    121442,
+    121733,
+    122079,
+    122005,
+    121557,
+    121603,
+    121764,
+    122030,
+    120554,
+    123865,
+    123871,
+    121115,
+    68236,
+    114287,
+    85183,
+    120818,
+    120932,
+    121004,
+    120843,
+    120947,
+    120819,
+    120703,
+    95132,
+    112473,
+    94387,
+    59986,
+    123782,
+    94594,
+    119857,
+    113554,
     119343,
+    117074,
     119342,
     119341,
     118169,
-    123280,
-    122863,
-    92886,
-    94383,
-    88589,
-    116403,
-    123183,
-    115408,
-    109461,
-    120014,
-    123270,
-    115869,
-    113115,
-    122394,
-    117574,
-    122396,
-    120332,
-    120566,
-    68236,
-    96438,
-    90062,
-    116046,
-    100511,
-    111462,
-    115572,
-    115285,
-    116013,
-    114296,
-    113554,
-    86655,
-    119985,
+    114173,
+    119797,
+    119800,
+    119833,
+    123722,
+    114204,
+    114098,
+    123793,
     104889,
-    100074,
-    102069,
-    109781,
-    104060
+    123777,
+    117734,
+    120573,
+    120566,
+    120621,
+    120522,
+    120577,
+    120632,
+    120562,
+    120360,
+    120374,
+    120456,
+    120432
   ]
 }
